@@ -12,31 +12,24 @@
   - [Compiling your contracts](#compiling-your-contracts)
 - [Deploy](#deploy)
 - [Simple Workers (For Testnets Without Default Workers)](#simple-workers-for-testnets-without-default-workers)
-  - [When to Use Simple Workers](#when-to-use-simple-workers)
+  - [What Are Simple Workers?](#what-are-simple-workers)
   - [Deploying Simple Workers](#deploying-simple-workers)
   - [Configuring Simple Workers](#configuring-simple-workers)
-  - [Using Simple Workers](#using-simple-workers)
+  - [Sending OFTs with Simple Workers](#sending-ofts-with-simple-workers)
   - [Simple Workers Architecture](#simple-workers-architecture)
   - [Important Limitations](#important-limitations)
   - [Troubleshooting Simple Workers](#troubleshooting-simple-workers)
-- [Enable Messaging](#enable-messaging)
-- [Sending OFTs](#sending-ofts)
+    - [Ordered Message Delivery](#ordered-message-delivery)
+    - [Recovery Options](#recovery-options)
+    - [Example: Multiple Pending Messages](#example-multiple-pending-messages)
 - [Next Steps](#next-steps)
 - [Production Deployment Checklist](#production-deployment-checklist)
   - [Profiling `lzReceive` and `lzCompose` Gas Usage](#profiling-lzreceive-and-lzcompose-gas-usage)
   - [Available Commands](#available-commands)
+  - [Usage Examples](#usage-examples)
     - [`lzReceive`](#lzreceive)
     - [`lzCompose`](#lzcompose)
-  - [Usage Examples](#usage-examples)
   - [Notes](#notes)
-- [Appendix](#appendix)
-  - [Running Tests](#running-tests)
-  - [Adding other chains](#adding-other-chains)
-  - [Using Multisigs](#using-multisigs)
-  - [LayerZero Hardhat Helper Tasks](#layerzero-hardhat-helper-tasks)
-    - [Manual Configuration](#manual-configuration)
-    - [Contract Verification](#contract-verification)
-    - [Troubleshooting](#troubleshooting)
 
 ## Prerequisite Knowledge
 
@@ -250,75 +243,6 @@ If nonce 6 fails because nonce 4 is pending:
 3. Finally, you can process nonce 6
 
 Remember: All messages must be handled in order!
-
-## Enable Messaging
-
-The OFT standard builds on top of the OApp standard, which enables generic message-passing between chains. After deploying the OFT on the respective chains, you enable messaging by running the [wiring](https://docs.layerzero.network/v2/concepts/glossary#wire--wiring) task.
-
-> :information_source: This example uses the [Simple Config Generator](https://docs.layerzero.network/v2/tools/simple-config), which is recommended over manual configuration.
-
-This example provides two configuration files:
-
-1. **`layerzero.config.ts`** - The standard configuration using LayerZero's default DVNs and Executors (recommended for most deployments)
-2. **`layerzero.simple-worker.config.ts`** - A template for using custom DVNs and Executors (useful for testnets without default workers or advanced custom setups)
-
-### Using the Standard Configuration (Default)
-
-For most deployments, use the standard configuration:
-
-```bash
-pnpm hardhat lz:oapp:wire --oapp-config layerzero.config.ts
-```
-
-The `layerzero.config.ts` file is organized into clear sections:
-
-- Contract definitions
-- Gas options
-- Pathway configuration using LayerZero's default workers
-
-### Using Custom Workers Configuration
-
-If you need custom DVNs and Executors (e.g., for testnets without default workers or custom security requirements), use:
-
-```bash
-pnpm hardhat lz:oapp:wire --oapp-config layerzero.simple-worker.config.ts
-```
-
-The `layerzero.simple-worker.config.ts` file is organized into clear sections:
-
-- **SECTION 1**: Contract definitions (YOU MUST EDIT)
-- **SECTION 2**: Gas options (YOU MAY NEED TO EDIT)
-- **SECTION 3**: Metadata configuration (MOSTLY BOILERPLATE)
-- **SECTION 4**: Custom executor/DVN addresses (YOU MUST EDIT if using custom workers)
-- **SECTION 5**: Pathway configuration (YOU MUST EDIT)
-- **SECTION 6**: Export configuration
-
-Submit all the transactions to complete wiring. After all transactions confirm, your OApps are wired and can send messages to each other.
-
-### Using Custom Executors and DVNs
-
-> :information_source: For testnets without default workers, see the [Simple Workers section](#simple-workers-for-testnets-without-default-workers) above.
-
-For production deployments or advanced use cases, you can deploy and configure your own custom Executors and DVNs. This is useful when:
-
-- You need specific fee structures or execution logic
-- You want full control over message verification and execution
-- You're building a custom security stack
-
-To use custom executors and DVNs:
-
-1. **Deploy your custom contracts** on each chain
-2. **Use the `layerzero.simple-worker.config.ts` template**:
-   - **SECTION 1**: Define your contracts
-   - **SECTION 4**: Add your custom executor/DVN addresses
-   - **SECTION 5**: Reference them by name in pathways
-3. **Wire normally** with `pnpm hardhat lz:oapp:wire --oapp-config layerzero.simple-worker.config.ts`
-
-> :warning: **Important**: Custom executors and DVNs must be deployed on each chain where they're needed. The same canonical name can resolve to different addresses on different chains.
-
-> :book: **For detailed instructions**, see the [Custom Workers Configuration Guide](./CUSTOM_WORKERS_GUIDE.md) which shows exactly what to modify in your configuration.
-
-> :information_source: **Note**: For production, review **SECTION 2** in `layerzero.simple-worker.config.ts` to adjust gas limits based on your contract's actual usage.
 
 ## Next Steps
 
