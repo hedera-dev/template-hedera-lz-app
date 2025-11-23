@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+
 import { createLogger } from '@layerzerolabs/io-devtools'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 import { ExecutorOptionType } from '@layerzerolabs/lz-v2-utilities'
@@ -7,6 +10,28 @@ import { OAppEnforcedOption } from '@layerzerolabs/toolbox-hardhat'
 import type { OmniPointHardhat } from '@layerzerolabs/toolbox-hardhat'
 
 const logger = createLogger()
+const deploymentsRoot = path.join(__dirname, 'deployments')
+
+const deploymentFolderByEid: Record<number, string> = {
+    [EndpointId.BASESEP_V2_TESTNET]: 'base-sepolia',
+    [EndpointId.HEDERA_V2_TESTNET]: 'hedera-testnet',
+}
+
+const loadDeploymentAddress = (eid: number, contractName: string): string => {
+    const networkFolder = deploymentFolderByEid[eid]
+    if (!networkFolder) {
+        throw new Error(`No deployment folder configured for eid ${eid}`)
+    }
+
+    const deploymentPath = path.join(deploymentsRoot, networkFolder, `${contractName}.json`)
+    const deploymentRaw = readFileSync(deploymentPath, 'utf8')
+    const deployment = JSON.parse(deploymentRaw)
+    if (!deployment.address) {
+        throw new Error(`Missing address for ${contractName} in ${deploymentPath}`)
+    }
+
+    return deployment.address
+}
 
 // ============================================================================
 // SECTION 1: CONTRACT DEFINITIONS - YOU MUST EDIT THIS
@@ -96,17 +121,17 @@ const customFetchMetadata = async (): Promise<IMetadata> => {
     // Get addresses from: ./deployments/<network-name>/YourContract.json
 
     const customExecutorsByEid: Record<number, { address: string }> = {
-        [EndpointId.BASESEP_V2_TESTNET]: { address: '0xcBF94554fD2916a87ED527Ee24D5Eb733fdc1C6E' }, // <-- EDIT THIS: YOUR BASE EXECUTOR
-        [EndpointId.HEDERA_V2_TESTNET]: { address: '0xAcbc6dD295bDD34614BFE3915E009ba9cb04c7c5' }, // <-- EDIT THIS: YOUR HEDERA EXECUTOR
+        [EndpointId.BASESEP_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASESEP_V2_TESTNET, 'SimpleExecutorMock') },
+        [EndpointId.HEDERA_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'SimpleExecutorMock') },
         // Add more executors for other chains:
-        // [EndpointId.BASE_V2_TESTNET]: { address: '0xYOUR_BASE_EXECUTOR_ADDRESS' },
+        // [EndpointId.BASE_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASE_V2_TESTNET, 'SimpleExecutorMock') },
     }
 
     const customDVNsByEid: Record<number, { address: string }> = {
-        [EndpointId.BASESEP_V2_TESTNET]: { address: '0x578909f704904FeEBAb57E25b376cd173229E41F' }, // <-- EDIT THIS: YOUR BASE DVN
-        [EndpointId.HEDERA_V2_TESTNET]: { address: '0xC9a6F61c2143a0Ed588274b144f6366AA0002ea2' }, // <-- EDIT THIS: YOUR HEDERA DVN
+        [EndpointId.BASESEP_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASESEP_V2_TESTNET, 'SimpleDVNMock') },
+        [EndpointId.HEDERA_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'SimpleDVNMock') },
         // Add more DVNs for other chains:
-        // [EndpointId.BASE_V2_TESTNET]: { address: '0xYOUR_BASE_DVN_ADDRESS' },
+        // [EndpointId.BASE_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASE_V2_TESTNET, 'SimpleDVNMock') },
     }
 
     // ==== BOILERPLATE START - DO NOT EDIT ====

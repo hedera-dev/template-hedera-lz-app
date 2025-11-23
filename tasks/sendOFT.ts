@@ -128,8 +128,6 @@ task('lz:oft:send', 'Sends OFT tokens cross‐chain from EVM chains')
 
         // print the explorer link for the srcEid from metadata
         const explorerLink = await getBlockExplorerLink(args.srcEid, result.txHash)
-
-        console.log('explorer link', explorerLink)
         // if explorer link is available, print the tx hash link
         if (explorerLink) {
             DebugLogger.printLayerZeroOutput(
@@ -149,6 +147,7 @@ task('lz:oft:send', 'Sends OFT tokens cross‐chain from EVM chains')
             if (!dstHre || !srcHre || !dstOftAddress || !srcOftAddress) {
                 throw new Error('SimpleWorkers: Missing resolved hre or oft info')
             }
+            console.log('trigger process receive called')
             await triggerProcessReceive(dstHre, srcHre, {
                 srcEid: args.srcEid,
                 dstEid: args.dstEid,
