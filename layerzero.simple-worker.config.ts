@@ -121,15 +121,23 @@ const customFetchMetadata = async (): Promise<IMetadata> => {
     // Get addresses from: ./deployments/<network-name>/YourContract.json
 
     const customExecutorsByEid: Record<number, { address: string }> = {
-        [EndpointId.BASESEP_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASESEP_V2_TESTNET, 'SimpleExecutorMock') },
-        [EndpointId.HEDERA_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'SimpleExecutorMock') },
+        [EndpointId.BASESEP_V2_TESTNET]: {
+            address: loadDeploymentAddress(EndpointId.BASESEP_V2_TESTNET, 'SimpleExecutorMock'),
+        },
+        [EndpointId.HEDERA_V2_TESTNET]: {
+            address: loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'SimpleExecutorMock'),
+        },
         // Add more executors for other chains:
         // [EndpointId.BASE_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASE_V2_TESTNET, 'SimpleExecutorMock') },
     }
 
     const customDVNsByEid: Record<number, { address: string }> = {
-        [EndpointId.BASESEP_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASESEP_V2_TESTNET, 'SimpleDVNMock') },
-        [EndpointId.HEDERA_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'SimpleDVNMock') },
+        [EndpointId.BASESEP_V2_TESTNET]: {
+            address: loadDeploymentAddress(EndpointId.BASESEP_V2_TESTNET, 'SimpleDVNMock'),
+        },
+        [EndpointId.HEDERA_V2_TESTNET]: {
+            address: loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'SimpleDVNMock'),
+        },
         // Add more DVNs for other chains:
         // [EndpointId.BASE_V2_TESTNET]: { address: loadDeploymentAddress(EndpointId.BASE_V2_TESTNET, 'SimpleDVNMock') },
     }
@@ -160,7 +168,7 @@ const customFetchMetadata = async (): Promise<IMetadata> => {
                     ...extendedMetadata[chainKey]?.executors,
                     [customExecutor.address]: {
                         version: 2,
-                        canonicalName: 'MyCustomExecutor', // <-- OPTIONAL: Change this name if desired
+                        canonicalName: 'SimpleExecutorMock', // <-- OPTIONAL: Change this name if desired
                         id: `my-custom-executor-${chainKey}`,
                     },
                 },
@@ -176,7 +184,7 @@ const customFetchMetadata = async (): Promise<IMetadata> => {
                     ...extendedMetadata[chainKey]?.dvns,
                     [customDVN.address]: {
                         version: 2,
-                        canonicalName: 'MyCustomDVN', // <-- OPTIONAL: Change this name if desired
+                        canonicalName: 'SimpleDVNMock', // <-- OPTIONAL: Change this name if desired
                         id: `my-custom-dvn-${chainKey}`,
                     },
                 },
@@ -199,19 +207,19 @@ const pathways: TwoWayConfig[] = [
     [
         hederaContract, // Source contract
         baseContract, // Destination contract
-        [['MyCustomDVN'], []], // DVN configuration: [[requiredDVNs], [optionalDVNs]]
+        [['SimpleDVNMock'], []], // DVN configuration: [[requiredDVNs], [optionalDVNs]]
         [1, 1], // Confirmations: [srcToDestConfirmations, destToSrcConfirmations]
         [EVM_ENFORCED_OPTIONS, EVM_ENFORCED_OPTIONS], // Gas options for each direction
-        'MyCustomExecutor', // Executor name (must match canonicalName above)
+        'SimpleExecutorMock', // Executor name (must match canonicalName above)
     ],
     // Add more pathways for additional chain pairs:
     // [
     //     optimismContract,
     //     baseContract,
-    //     [['MyCustomDVN'], []],
+    //     [['SimpleDVNMock'], []],
     //     [1, 1],
     //     [EVM_ENFORCED_OPTIONS, EVM_ENFORCED_OPTIONS],
-    //     'MyCustomExecutor',
+    //     'SimpleExecutorMock',
     // ],
 ]
 
