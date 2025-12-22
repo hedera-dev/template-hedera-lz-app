@@ -234,8 +234,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             // Choose the appropriate config based on token type
             const configPath =
                 args.tokenType === 'asset'
-                    ? args.assetOappConfig || 'layerzero.asset.config.ts'
-                    : args.shareOappConfig || 'layerzero.share.config.ts'
+                    ? args.assetOappConfig || 'config/layerzero.asset.config.ts'
+                    : args.shareOappConfig || 'config/layerzero.share.config.ts'
 
             // Call the existing sendEvm function with no compose message
             const evmArgs: EvmArgs = {
@@ -310,8 +310,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         // Choose the appropriate config based on token type
         const configPath =
             args.tokenType === 'asset'
-                ? args.assetOappConfig || 'layerzero.asset.config.ts'
-                : args.shareOappConfig || 'layerzero.share.config.ts'
+                ? args.assetOappConfig || 'config/layerzero.asset.config.ts'
+                : args.shareOappConfig || 'config/layerzero.share.config.ts'
 
         // Get vault address and call preview functions to determine output amounts
         const vaultDeployment = await hubHre.deployments.get('MyERC4626')
@@ -379,8 +379,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             // Determine which OFT to quote (opposite of what we're sending)
             const outputTokenConfig =
                 args.tokenType === 'asset'
-                    ? args.shareOappConfig || 'layerzero.share.config.ts' // Asset input → Share output
-                    : args.assetOappConfig || 'layerzero.asset.config.ts' // Share input → Asset output
+                    ? args.shareOappConfig || 'config/layerzero.share.config.ts' // Asset input → Share output
+                    : args.assetOappConfig || 'config/layerzero.asset.config.ts' // Share input → Asset output
 
             const outputLayerZeroConfig = (await import(path.resolve('./', outputTokenConfig))).default
             const { contracts: outputContracts } =

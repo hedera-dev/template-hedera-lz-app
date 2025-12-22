@@ -13,28 +13,15 @@ import { HardhatUserConfig, HttpNetworkAccountsUserConfig } from 'hardhat/types'
 
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
-import './tasks/sendOFT'
-import './tasks/sendOVaultComposer'
+import './tasks'
 
-// Set your preferred authentication method
-//
-// If you prefer using a mnemonic, set a MNEMONIC environment variable
-// to a valid mnemonic
-const MNEMONIC = process.env.MNEMONIC
-
-// If you prefer to be authenticated using a private key, set a PRIVATE_KEY environment variable
+// Authenticate using a private key
 const PRIVATE_KEY = process.env.PRIVATE_KEY
 
-const accounts: HttpNetworkAccountsUserConfig | undefined = MNEMONIC
-    ? { mnemonic: MNEMONIC }
-    : PRIVATE_KEY
-      ? [PRIVATE_KEY]
-      : undefined
+const accounts: HttpNetworkAccountsUserConfig | undefined = PRIVATE_KEY ? [PRIVATE_KEY] : undefined
 
 if (accounts == null) {
-    console.warn(
-        'Could not find MNEMONIC or PRIVATE_KEY environment variables. It will not be possible to execute transactions in your example.'
-    )
+    console.warn('Could not find PRIVATE_KEY environment variable. Transactions will fail without a signer.')
 }
 
 const config: HardhatUserConfig = {
@@ -55,19 +42,14 @@ const config: HardhatUserConfig = {
         ],
     },
     networks: {
-        'optimism-sepolia': {
-            eid: EndpointId.OPTSEP_V2_TESTNET,
-            url: process.env.RPC_URL_OPTIMISM_TESTNET || 'https://optimism-sepolia.gateway.tenderly.co',
+        'hedera-testnet': {
+            eid: EndpointId.HEDERA_V2_TESTNET,
+            url: process.env.RPC_URL_HEDERA_TESTNET || 'https://testnet.hashio.io/api',
             accounts,
         },
         'base-sepolia': {
             eid: EndpointId.BASESEP_V2_TESTNET,
-            url: process.env.RPC_URL_BASE_TESTNET || 'https://base-sepolia.gateway.tenderly.co',
-            accounts,
-        },
-        'arbitrum-sepolia': {
-            eid: EndpointId.ARBSEP_V2_TESTNET,
-            url: process.env.RPC_URL_ARBITRUM_TESTNET || 'https://arbitrum-sepolia.gateway.tenderly.co',
+            url: process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.gateway.tenderly.co',
             accounts,
         },
         hardhat: {

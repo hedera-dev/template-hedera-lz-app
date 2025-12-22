@@ -33,7 +33,12 @@ task('lz:oft:send', 'Sends OFT tokens cross-chain from EVM chains')
     .addParam('dstEid', 'Destination endpoint ID', undefined, types.int)
     .addParam('amount', 'Amount to send (human readable units, e.g. "1.5")', undefined, types.string)
     .addParam('to', 'Recipient address (20-byte hex for EVM)', undefined, types.string)
-    .addOptionalParam('oappConfig', 'Path to the LayerZero config file', 'layerzero.config.ts', types.string)
+    .addOptionalParam(
+        'oappConfig',
+        'Path to the LayerZero config file (defaults to simple-worker-ready asset config)',
+        'config/layerzero.asset.config.ts',
+        types.string
+    )
     .addOptionalParam(
         'minAmount',
         'Minimum amount to receive in case of custom slippage or fees (human readable units, e.g. "1.5")',

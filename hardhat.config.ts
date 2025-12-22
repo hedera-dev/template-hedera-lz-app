@@ -13,17 +13,15 @@ import { HardhatUserConfig, HttpNetworkAccountsUserConfig } from 'hardhat/types'
 
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
-import './tasks/index'
+import './tasks'
 
-// If you prefer to be authenticated using a private key, set a PRIVATE_KEY environment variable
+// Authenticate using a private key
 const PRIVATE_KEY = process.env.PRIVATE_KEY
 
 const accounts: HttpNetworkAccountsUserConfig | undefined = PRIVATE_KEY ? [PRIVATE_KEY] : undefined
 
 if (accounts == null) {
-    console.warn(
-        'Could not find MNEMONIC or PRIVATE_KEY environment variables. It will not be possible to execute transactions in your example.'
-    )
+    console.warn('Could not find PRIVATE_KEY environment variable. Transactions will fail without a signer.')
 }
 
 const config: HardhatUserConfig = {
