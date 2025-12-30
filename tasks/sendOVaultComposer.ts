@@ -1,6 +1,6 @@
 import path from 'path'
 
-import { parseUnits } from 'ethers/lib/utils'
+import { formatUnits, parseUnits } from 'ethers/lib/utils'
 import { task, types } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 
@@ -50,13 +50,13 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
     .addOptionalParam(
         'assetOappConfig',
         'Path to the Asset OFT config file',
-        'config/layerzero.ovault.config.ts',
+        'config/layerzero.asset.config.ts',
         types.string
     )
     .addOptionalParam(
         'shareOappConfig',
         'Path to the Share OFT config file',
-        'config/layerzero.ovault.config.ts',
+        'config/layerzero.share.config.ts',
         types.string
     )
     .addOptionalParam(
@@ -123,6 +123,7 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         let dstHre: HardhatRuntimeEnvironment | null = null
         let srcOftAddress: string | null = null
         let dstOftAddress: string | null = null
+        let composeFromAddress: string | null = null
 
         // Check if all chains are the same (hub) - if so, just do direct vault interaction
         if (args.srcEid === hubEid && args.dstEid === hubEid) {
@@ -235,9 +236,9 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             return { txHash }
         }
 
-        // Check if we're already on the hub chain - if so, just do a normal OFT send
-        if (args.srcEid === hubEid) {
-            logger.info(`Source is already hub chain - performing direct OFT send without composer`)
+        // If we're on the hub and sending assets, a direct OFT send is enough (no composer needed).
+        if (args.srcEid === hubEid && args.tokenType === 'asset') {
+            logger.info(`Source is hub chain - performing direct OFT send without composer`)
             logger.info(
                 `Direct transfer: ${endpointIdToNetwork(args.srcEid)} → ${endpointIdToNetwork(args.dstEid)} (${args.tokenType} tokens)`
             )
@@ -245,14 +246,15 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             // Choose the appropriate config based on token type
             const configPath =
                 args.tokenType === 'asset'
-                    ? args.assetOappConfig || 'config/layerzero.ovault.config.ts'
-                    : args.shareOappConfig || 'config/layerzero.ovault.config.ts'
+                    ? args.assetOappConfig || 'config/layerzero.asset.config.ts'
+                    : args.shareOappConfig || 'config/layerzero.share.config.ts'
 
             if (args.simpleWorkers) {
                 ;[dstHre, srcHre] = await Promise.all([getHreByEid(args.dstEid), getHreByEid(args.srcEid)])
                 if (!dstHre || !srcHre) {
                     throw new Error('Failed to resolve Hardhat runtimes for src/dst EIDs')
                 }
+                composeFromAddress = (await srcHre.ethers.getSigners())[0].address
                 const addrs = await getOftAddresses(
                     args.srcEid,
                     args.dstEid,
@@ -328,6 +330,126 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             return
         }
 
+        // If we're on the hub and sending shares, redeem locally and send assets to destination.
+        if (args.srcEid === hubEid && args.tokenType === 'share') {
+            const composerDeployment = await hubHre.deployments.get('MyOVaultComposer')
+            const composerAddress = composerDeployment.address
+            const hubSigner = (await hubHre.ethers.getSigners())[0]
+
+            const vaultDeployment = await hubHre.deployments.get('MyERC4626')
+            const vaultAddress = vaultDeployment.address
+            const ierc4626Artifact = await hubHre.artifacts.readArtifact('IERC4626')
+            const vault = await hubHre.ethers.getContractAt(ierc4626Artifact.abi, vaultAddress, hubSigner)
+            const ierc20Artifact = await hubHre.artifacts.readArtifact('IERC20')
+            const shareToken = await hubHre.ethers.getContractAt(ierc20Artifact.abi, vaultAddress, hubSigner)
+
+            const inputAmountUnits = parseUnits(args.amount, 18)
+            let expectedOutputAmount: string
+            let minAmountOut: string
+
+            try {
+                const previewedAssets = await vault.previewRedeem(inputAmountUnits)
+                expectedOutputAmount = previewedAssets.toString()
+                logger.info(
+                    `Vault preview: ${args.amount} ${args.tokenType} → ${(parseInt(expectedOutputAmount) / 1e18).toFixed(6)} assets`
+                )
+            } catch (error) {
+                logger.warn(`Vault preview failed, using 1:1 estimate`)
+                expectedOutputAmount = inputAmountUnits.toString()
+            }
+
+            if (args.minAmount) {
+                minAmountOut = parseUnits(args.minAmount, 18).toString()
+            } else {
+                minAmountOut = expectedOutputAmount
+            }
+
+            const currentAllowance = await shareToken.allowance(hubSigner.address, composerAddress)
+            if (currentAllowance.lt(inputAmountUnits)) {
+                logger.info(`Approving composer to spend ${args.amount} shares...`)
+                const approveTx = await shareToken.approve(composerAddress, inputAmountUnits)
+                await approveTx.wait()
+                logger.info('Share approval confirmed')
+            }
+
+            const lzReceiveGas = args.lzReceiveGas || 100000
+            const lzReceiveValue = args.lzReceiveValue || '0'
+            const extraOptions = Options.newOptions().addExecutorLzReceiveOption(lzReceiveGas, lzReceiveValue).toHex()
+
+            const sendParam = {
+                dstEid: args.dstEid,
+                to: addressToBytes32(args.to),
+                amountLD: '0',
+                minAmountLD: minAmountOut,
+                extraOptions: extraOptions,
+                composeMsg: '0x',
+                oftCmd: '0x',
+            }
+
+            const assetConfigPath = args.assetOappConfig || 'config/layerzero.asset.config.ts'
+            const assetAddrs = await getOftAddresses(
+                args.srcEid,
+                args.dstEid,
+                assetConfigPath,
+                (eid: number) => Promise.resolve(createGetHreByEid(hre)(eid)),
+                args.oftAddress
+            )
+
+            const composer = await hubHre.ethers.getContractAt(
+                await hubHre.artifacts.readArtifact('MyOVaultComposer').then((a) => a.abi),
+                composerAddress,
+                hubSigner
+            )
+
+            const msgFee = await composer.quoteSend(hubSigner.address, assetAddrs.srcOft, inputAmountUnits, sendParam)
+
+            const endpointDeployment = await hubHre.deployments.get('EndpointV2')
+            const endpoint = new hubHre.ethers.Contract(endpointDeployment.address, endpointDeployment.abi, hubSigner)
+            const dstWrapperBytes32 = hubHre.ethers.utils.hexZeroPad(assetAddrs.dstOft, 32)
+            const outboundNonce = (await endpoint.outboundNonce(assetAddrs.srcOft, args.dstEid, dstWrapperBytes32)).add(
+                1
+            )
+
+            const tx = await composer.redeemAndSend(inputAmountUnits, sendParam, hubSigner.address, {
+                value: msgFee.nativeFee,
+            })
+            const receipt = await tx.wait()
+
+            DebugLogger.printLayerZeroOutput(
+                KnownOutputs.SENT_VIA_OFT,
+                `Successfully redeemed ${args.amount} shares and sent assets: ${endpointIdToNetwork(args.srcEid)} → ${endpointIdToNetwork(args.dstEid)}`
+            )
+
+            const explorerLink = await getBlockExplorerLink(args.srcEid, receipt.transactionHash)
+            if (explorerLink) {
+                DebugLogger.printLayerZeroOutput(
+                    KnownOutputs.TX_HASH,
+                    `Explorer link for source chain ${endpointIdToNetwork(args.srcEid)}: ${explorerLink}`
+                )
+            }
+
+            if (args.simpleWorkers) {
+                ;[dstHre, srcHre] = await Promise.all([getHreByEid(args.dstEid), getHreByEid(args.srcEid)])
+                if (!dstHre || !srcHre) {
+                    throw new Error('Failed to resolve Hardhat runtimes for src/dst EIDs')
+                }
+                const assetAmountHuman = formatUnits(expectedOutputAmount, 18)
+                await triggerProcessReceive(dstHre, srcHre, {
+                    srcEid: args.srcEid,
+                    dstEid: args.dstEid,
+                    to: args.to,
+                    amount: assetAmountHuman,
+                    outboundNonce: outboundNonce.toString(),
+                    srcOftAddress: assetAddrs.srcOft,
+                    dstOftAddress: assetAddrs.dstOft,
+                    dstContractName: undefined,
+                    extraOptions: extraOptions,
+                })
+            }
+
+            return
+        }
+
         // Get OVaultComposer address from deployments on HUB
         const composerDeployment = await hubHre.deployments.get('MyOVaultComposer')
         const composerAddress = composerDeployment.address
@@ -355,14 +477,15 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         // Choose the appropriate config based on token type
         const configPath =
             args.tokenType === 'asset'
-                ? args.assetOappConfig || 'config/layerzero.ovault.config.ts'
-                : args.shareOappConfig || 'config/layerzero.ovault.config.ts'
+                ? args.assetOappConfig || 'config/layerzero.asset.config.ts'
+                : args.shareOappConfig || 'config/layerzero.share.config.ts'
 
         if (args.simpleWorkers) {
             ;[dstHre, srcHre] = await Promise.all([getHreByEid(hubEid), getHreByEid(args.srcEid)])
             if (!dstHre || !srcHre) {
                 throw new Error('Failed to resolve Hardhat runtimes for src/hub EIDs')
             }
+            composeFromAddress = (await srcHre.ethers.getSigners())[0].address
             const addrs = await getOftAddresses(
                 args.srcEid,
                 hubEid,
@@ -441,8 +564,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             // Determine which OFT to quote (opposite of what we're sending)
             const outputTokenConfig =
                 args.tokenType === 'asset'
-                    ? args.shareOappConfig || 'config/layerzero.ovault.config.ts' // Asset input → Share output
-                    : args.assetOappConfig || 'config/layerzero.ovault.config.ts' // Share input → Asset output
+                    ? args.shareOappConfig || 'config/layerzero.share.config.ts' // Asset input → Share output
+                    : args.assetOappConfig || 'config/layerzero.asset.config.ts' // Share input → Asset output
 
             const outputLayerZeroConfig = (await import(path.resolve('./', outputTokenConfig))).default
             const { contracts: outputContracts } =
@@ -558,6 +681,9 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             if (!dstHre || !srcHre || !dstOftAddress || !srcOftAddress || !result.outboundNonce) {
                 throw new Error('SimpleWorkers: Missing resolved hre or oft info')
             }
+            if (!composeFromAddress) {
+                throw new Error('SimpleWorkers: Missing composeFrom address')
+            }
             await triggerProcessReceive(dstHre, srcHre, {
                 srcEid: args.srcEid,
                 dstEid: hubEid,
@@ -568,6 +694,11 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
                 dstOftAddress,
                 dstContractName: undefined,
                 extraOptions: result.extraOptions,
+                composeMsg,
+                composeFrom: composeFromAddress,
+                composeTo: composerAddress,
+                composeGas: lzComposeGas.toString(),
+                composeValue: lzComposeValue,
             })
         }
     })

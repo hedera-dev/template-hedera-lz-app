@@ -41,8 +41,8 @@ task('lz:oft:send', 'Sends OFT tokens cross‐chain from EVM chains')
     .addParam('to', 'Recipient address (20-byte hex for EVM)', undefined, types.string)
     .addOptionalParam(
         'oappConfig',
-        'Path to the LayerZero config file',
-        'layerzero.simple-worker.config.ts',
+        'Path to the LayerZero config file (defaults to asset config for Chapter 1)',
+        'config/layerzero.asset.config.ts',
         types.string
     )
     .addOptionalParam(

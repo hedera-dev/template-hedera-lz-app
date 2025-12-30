@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-
 import { createLogger } from '@layerzerolabs/io-devtools'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 import { ExecutorOptionType } from '@layerzerolabs/lz-v2-utilities'
@@ -8,37 +5,17 @@ import { IMetadata, TwoWayConfig, defaultFetchMetadata, generateConnectionsConfi
 import { OAppEnforcedOption } from '@layerzerolabs/toolbox-hardhat'
 
 import type { OmniPointHardhat } from '@layerzerolabs/toolbox-hardhat'
+import { loadDeploymentAddress } from './utils'
 
 const logger = createLogger()
-const deploymentsRoot = path.join(__dirname, '..', 'deployments')
 
-const deploymentFolderByEid: Record<number, string> = {
-    [EndpointId.BASESEP_V2_TESTNET]: 'base-sepolia',
-    [EndpointId.HEDERA_V2_TESTNET]: 'hedera-testnet',
-}
-
-const loadDeploymentAddress = (eid: number, contractName: string): string => {
-    const networkFolder = deploymentFolderByEid[eid]
-    if (!networkFolder) {
-        throw new Error(`No deployment folder configured for eid ${eid}`)
-    }
-
-    const deploymentPath = path.join(deploymentsRoot, networkFolder, `${contractName}.json`)
-    const deploymentRaw = readFileSync(deploymentPath, 'utf8')
-    const deployment = JSON.parse(deploymentRaw)
-    if (!deployment.address) {
-        throw new Error(`Missing address for ${contractName} in ${deploymentPath}`)
-    }
-
-    return deployment.address
-}
-
-const hederaContract: OmniPointHardhat = {
+// Share mesh: adapter on Hedera (hub) and ShareOFT on Base
+const hederaShareAdapter: OmniPointHardhat = {
     eid: EndpointId.HEDERA_V2_TESTNET,
     contractName: 'MyShareOFTAdapter',
 }
 
-const baseContract: OmniPointHardhat = {
+const baseShareOft: OmniPointHardhat = {
     eid: EndpointId.BASESEP_V2_TESTNET,
     contractName: 'MyShareOFT',
 }
@@ -61,7 +38,7 @@ const EVM_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
 const customFetchMetadata = async (): Promise<IMetadata> => {
     const defaultMetadata = await defaultFetchMetadata()
 
-    const configuredContracts = [hederaContract, baseContract]
+    const configuredContracts = [hederaShareAdapter, baseShareOft]
     const configuredEids = [...new Set(configuredContracts.map((contract) => contract.eid))]
 
     const chainKeyMap: Record<number, string> = {}
@@ -156,8 +133,8 @@ const customFetchMetadata = async (): Promise<IMetadata> => {
 
 const pathways: TwoWayConfig[] = [
     [
-        hederaContract,
-        baseContract,
+        hederaShareAdapter,
+        baseShareOft,
         [['SimpleDVNMock'], []],
         [1, 1],
         [EVM_ENFORCED_OPTIONS, EVM_ENFORCED_OPTIONS],
@@ -168,7 +145,7 @@ const pathways: TwoWayConfig[] = [
 export default async function () {
     const connections = await generateConnectionsConfig(pathways, { fetchMetadata: customFetchMetadata })
     return {
-        contracts: [{ contract: hederaContract }, { contract: baseContract }],
+        contracts: [{ contract: hederaShareAdapter }, { contract: baseShareOft }],
         connections,
     }
 }

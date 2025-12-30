@@ -8,6 +8,7 @@ import { DebugLogger } from '../../utils'
 import type { HardhatRuntimeEnvironment } from 'hardhat/types'
 
 const logger = createLogger()
+const ERC20_DECIMALS_ABI = ['function decimals() view returns (uint8)']
 
 export interface SimpleDvnMockTaskArgs {
     srcEid: number
@@ -18,6 +19,11 @@ export interface SimpleDvnMockTaskArgs {
     dstEid: number
     dstContractName?: string
     extraOptions?: string // Add support for extra options containing native drops
+    composeMsg?: string // Raw compose message for lzCompose
+    composeFrom?: string // Address used as composeFrom (bytes32) in compose payload
+    composeTo?: string // Target contract for lzCompose execution
+    composeGas?: string // Gas limit for compose execution
+    composeValue?: string // Msg value for compose execution
 }
 
 export interface ProcessedMessage {
@@ -26,7 +32,9 @@ export interface ProcessedMessage {
     localOappB32: string
     message: string
     amountUnits: ethers.BigNumber
+    amountReceivedLD: ethers.BigNumber
     sharedDecimals: number
+    localDecimals: number
     localOapp: string
     nativeDrops: Array<{ recipient: string; amount: string }> // Add native drops info
 }
@@ -35,23 +43,43 @@ export interface ProcessedMessage {
  * Process message parameters and build the message payload
  */
 export async function processMessage(dstOftContract: Contract, args: SimpleDvnMockTaskArgs): Promise<ProcessedMessage> {
-    const { srcOapp, toAddress, amount, extraOptions } = args
+    const { srcOapp, toAddress, amount, extraOptions, composeMsg, composeFrom } = args
 
     const localOapp = dstOftContract.address
 
     // Get shared decimals from destination OFT contract
     const sharedDecimals: number = await dstOftContract.sharedDecimals()
+    // Get local decimals of current chain OFT
+    // Need to use ERC20 interface because IOFT doesn't have .decimals()
+    const erc20 = new Contract(dstOftContract.address, ERC20_DECIMALS_ABI, dstOftContract.provider)
+    const localDecimals = await erc20.decimals()
 
     // Parse amount using shared decimals
     const amountUnits = ethers.utils.parseUnits(amount, sharedDecimals)
+    const decimalsDiff = localDecimals - sharedDecimals
+    const conversionRate = ethers.BigNumber.from(10).pow(Math.abs(decimalsDiff))
+    const amountReceivedLD = decimalsDiff >= 0 ? amountUnits.mul(conversionRate) : amountUnits.div(conversionRate)
 
     // Format addresses to bytes32
     const srcOAppB32 = addressToBytes32(srcOapp) as unknown as string
     const toB32 = addressToBytes32(toAddress) as unknown as string
     const localOappB32 = addressToBytes32(localOapp) as unknown as string
 
-    // Build OFT message payload - only bytes32 (to) and uint64 (amount)
-    const message = ethers.utils.solidityPack(['bytes32', 'uint64'], [toB32, amountUnits])
+    // Build OFT message payload
+    let message: string
+    if (composeMsg) {
+        if (!composeFrom) {
+            throw new Error('composeFrom is required when composeMsg is provided')
+        }
+        const composeFromB32 = addressToBytes32(composeFrom) as unknown as string
+        message = ethers.utils.solidityPack(
+            ['bytes32', 'uint64', 'bytes32', 'bytes'],
+            [toB32, amountUnits, composeFromB32, composeMsg]
+        )
+    } else {
+        // bytes32 (to) and uint64 (amount)
+        message = ethers.utils.solidityPack(['bytes32', 'uint64'], [toB32, amountUnits])
+    }
 
     // Extract native drop information from extraOptions if available
     const nativeDrops: Array<{ recipient: string; amount: string }> = []
@@ -95,7 +123,9 @@ export async function processMessage(dstOftContract: Contract, args: SimpleDvnMo
         localOappB32,
         message,
         amountUnits,
+        amountReceivedLD,
         sharedDecimals,
+        localDecimals,
         localOapp,
         nativeDrops,
     }
@@ -223,6 +253,11 @@ export async function triggerProcessReceive(
         dstOftAddress: string
         dstContractName?: string
         extraOptions?: string
+        composeMsg?: string
+        composeFrom?: string
+        composeTo?: string
+        composeGas?: string
+        composeValue?: string
     }
 ): Promise<void> {
     logger.info('\nSimpleDVN Development Mode Enabled')
@@ -261,6 +296,11 @@ export async function triggerProcessReceive(
         amount: params.amount,
         dstContractName: params.dstContractName,
         extraOptions: params.extraOptions,
+        composeMsg: params.composeMsg,
+        composeFrom: params.composeFrom,
+        composeTo: params.composeTo,
+        composeGas: params.composeGas,
+        composeValue: params.composeValue,
     }
 
     const { processReceive } = await import('./processReceive')

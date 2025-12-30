@@ -30,7 +30,7 @@ export async function processReceive(
 
         // Process message to get the required parameters
         const processed = await processMessage(dstOftContract, args)
-        const { srcOAppB32, message, localOappB32, nativeDrops } = processed
+        const { srcOAppB32, message, localOappB32, nativeDrops, amountReceivedLD } = processed
 
         // Generate GUID
         const guid = generateGuid(args.nonce, args.srcEid, srcOAppB32, args.dstEid, localOappB32)
@@ -81,6 +81,37 @@ export async function processReceive(
             hre
         )
         logger.info('\nSimpleWorkers message processing completed successfully!')
+
+        // Step 3: Optional compose execution (used by OVault flows)
+        if (args.composeMsg) {
+            if (!args.composeTo || !args.composeFrom) {
+                throw new Error('composeTo and composeFrom are required for lzCompose execution')
+            }
+
+            const composeFromB32 = hre.ethers.utils.hexZeroPad(args.composeFrom, 32)
+            const composePayload = hre.ethers.utils.solidityPack(
+                ['uint64', 'uint32', 'uint256', 'bytes32', 'bytes'],
+                [args.nonce, args.srcEid, amountReceivedLD, composeFromB32, args.composeMsg]
+            )
+
+            const composeGas = args.composeGas || '200000'
+            const composeValue = args.composeValue || '0'
+
+            logger.info('Step 3: Executor composing message delivery...')
+            const tx = await destinationExecutorMock.compose302(
+                processed.localOapp,
+                args.composeTo,
+                guid,
+                0,
+                composePayload,
+                '0x',
+                composeGas,
+                { value: composeValue }
+            )
+            logger.info(`Executor compose302 transaction: ${tx.hash}`)
+            const receipt = await tx.wait()
+            logger.info(`Compose confirmed in block: ${receipt.blockNumber}`)
+        }
     } catch (error) {
         logger.error(`Message processing failed:`, error)
 

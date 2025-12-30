@@ -62,10 +62,10 @@ export const DEPLOYMENT_CONFIG: DeploymentConfig = {
 
     // Asset OFT configuration (deployed on specified chains OR use existing address)
     assetOFT: {
-        contract: 'MyAssetOFT',
+        contract: 'MyOFT',
         metadata: {
-            name: 'MyAssetOFT',
-            symbol: 'ASSET',
+            name: 'MyOFT',
+            symbol: 'MOFT',
         },
         deploymentEids: [_hubEid, ..._spokeEids],
     },
