@@ -49,7 +49,7 @@ const config: HardhatUserConfig = {
         },
         'base-sepolia': {
             eid: EndpointId.BASESEP_V2_TESTNET,
-            url: process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.gateway.tenderly.co',
+            url: process.env.RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org',
             accounts,
         },
         hardhat: {

@@ -1,41 +1,81 @@
-<h1 align="center">Hedera ↔ Base OVault (LayerZero v2)</h1>
+<h1 align="center">LayerZero on Hedera: OFT → OVault (Hedera ↔ Base)</h1>
 
-Hedera-first fork of the LayerZero OVault example. Hedera acts as the hub chain, Base Sepolia as the spoke. Simple Worker mocks are used for testnets (no default executors/DVNs), so this is **development only**.
+Progressive tutorial for Hedera developers. Start with a simple OFT transfer, then layer in OVault (Hedera hub, Base spoke). Testnet-only with Simple Worker mocks; swap to production DVNs/executors for mainnet.
 
 ## Requirements
 
-- Node.js ≥ 18.18, pnpm ≥ 8
-- One funded deployer private key (Hedera testnet + Base Sepolia)
-- Basic familiarity with OFTs, OVault, and LayerZero v2 wiring
+- `Node.js` - ` >=18.16.0`
+- `pnpm` (recommended) - or another package manager of your choice (npm, yarn)
+- `forge` (optional) - `>=0.2.0` for testing, and if not using Hardhat for compilation
 
 ## Setup
 
-```bash
-pnpm install
-cp .env.example .env
-# fill PRIVATE_KEY, optionally override RPC_URL_HEDERA_TESTNET / RPC_URL_BASE_SEPOLIA
-```
-
-Networks are already limited to `hedera-testnet` and `base-sepolia` in `hardhat.config.ts`.
+1. Copy `.env.example` into a new `.env`
+2. Add your [Hedera Portal](https://hubs.ly/Q03Vgc6j0) or existing deployer address/account to the `.env`
+3. If using an existing account, fund it with the native tokens of the chains you want to deploy to e.g. the [Hedera Faucet](https://hubs.ly/Q03Vgcf00). This example by default will deploy to the following chains' testnets: **Hedera** and **Base**.
 
 ## Build
+
+### Compiling your contracts
+
+This project supports both `hardhat` and `forge` compilation. By default, the `compile` command will execute both:
 
 ```bash
 pnpm compile
 ```
 
-## Deploy (Hedera hub, Base spoke)
-
-1) Deploy Simple Worker mocks on both chains:
+If you prefer one over the other, you can use the tooling-specific commands:
 
 ```bash
-pnpm hardhat lz:deploy --tags SimpleDVNMock --network hedera-testnet
-pnpm hardhat lz:deploy --tags SimpleExecutorMock --network hedera-testnet
-pnpm hardhat lz:deploy --tags SimpleDVNMock --network base-sepolia
-pnpm hardhat lz:deploy --tags SimpleExecutorMock --network base-sepolia
+pnpm compile:forge
+pnpm compile:hardhat
 ```
 
-2) Deploy the OVault stack (hub on Hedera, spoke on Base) using `devtools/deployConfig.ts`:
+## Chapter 1: Hello OFT (Hedera ↔ Base)
+
+1. **Deploy Simple Workers (mocks) on both chains**
+
+```bash
+pnpm hardhat lz:deploy --tags SimpleDVNMock
+pnpm hardhat lz:deploy --tags SimpleExecutorMock
+```
+
+2. **Deploy the OFT (MyAssetOFT) on both chains**
+
+```bash
+pnpm hardhat lz:deploy --tags MyOFT --network hedera-testnet
+pnpm hardhat lz:deploy --tags MyOFT --network base-sepolia
+```
+
+3. **Wire OFT for Simple Workers**
+
+```bash
+pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
+```
+
+4. **Send tokens cross-chain (Base → Hedera or reverse)**
+
+```bash
+pnpm hardhat lz:oft:send --src-eid 40245 --dst-eid 40285 --amount 1 --to <EVM_ADDRESS> \
+  --oapp-config config/layerzero.asset.config.ts --simple-workers
+```
+
+If a message is pending, run on the destination chain:
+
+```bash
+pnpm hardhat lz:simple-workers:process-receive --src-eid 40245 --dst-eid 40285 \
+  --src-oapp <SRC_OFT_ADDR> --nonce <NONCE> --to-address <RECIPIENT> --amount 1
+```
+
+**What you learned:** endpoints, wiring, quoting/sending, manual processing with Simple Workers.
+
+## Chapter 2: OVault (Hedera hub, Base spoke)
+
+Architecture: Hedera hosts the vault, adapter, composer, and an asset OFT. Base hosts the share OFT (and asset OFT). Example flow: user pays on Base and receives vault shares on Hedera.
+
+1. **Config**: `devtools/deployConfig.ts` already sets Hedera hub, Base spoke. Adjust names/symbols if needed.
+
+2. **Deploy OVault stack**
 
 ```bash
 # Hedera (vault + adapter + composer + asset OFT)
@@ -44,53 +84,42 @@ pnpm hardhat lz:deploy --tags ovault --network hedera-testnet
 pnpm hardhat lz:deploy --tags ovault --network base-sepolia
 ```
 
-## Wire LayerZero (Simple Workers)
-
-Configs are already simple-worker ready and scoped to Hedera/Base:
-
-- Assets: `config/layerzero.asset.config.ts`
-- Shares: `config/layerzero.share.config.ts`
-
-Wire after mocks + contracts are deployed:
+3. **Wire OVault messaging (Simple Workers)**
 
 ```bash
 pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.share.config.ts
 ```
 
-## Send flows
+4. **OVault operations**
 
-- Direct OFT send (assets by default):
-
-```bash
-pnpm hardhat lz:oft:send --src-eid 40285 --dst-eid 40245 --amount 1 --to <EVM_ADDRESS> \
-  --oapp-config config/layerzero.asset.config.ts
-```
-
-- OVault composer send (end-to-end deposit/redeem across chains):
+- Pay on Base, receive shares on Hedera (asset → share):
 
 ```bash
-# Deposit assets from Hedera → shares on Base
-pnpm hardhat lz:ovault:send --src-eid 40285 --dst-eid 40245 --amount 1 --to <EVM_ADDRESS> --token-type asset
-
-# Redeem shares from Base → assets on Hedera
-pnpm hardhat lz:ovault:send --src-eid 40245 --dst-eid 40285 --amount 1 --to <EVM_ADDRESS> --token-type share
+pnpm hardhat lz:ovault:send --src-eid 40245 --dst-eid 40285 --amount 1 --to <EVM_ADDRESS> \
+  --token-type asset --simple-workers
 ```
 
-Both tasks default to the simple-worker configs and will target Hedera/Base only.
+- Redeem shares on Hedera back to assets (share → asset):
 
-## Project layout (post-refactor)
+```bash
+pnpm hardhat lz:ovault:send --src-eid 40285 --dst-eid 40245 --amount 1 --to <EVM_ADDRESS> \
+  --token-type share --simple-workers
+```
+
+If a message is pending, process on the destination chain with the Simple Worker tasks (same as Chapter 1).
+
+## Project layout
 
 - `contracts/` – MyAssetOFT, MyShareOFT, MyShareOFTAdapter, MyOVaultComposer, MyERC4626
-- `deploy/` – ovault deploy script + SimpleDVNMock/SimpleExecutorMock/DestinationExecutorMock
-- `devtools/` – `deployConfig.ts` (Hedera hub, Base spoke) and helpers
-- `layerzero.*.config.ts` – simple-worker wiring for assets and shares (Hedera/Base only)
-- `tasks/` – `lz:oft:send`, `lz:ovault:send`, shared send helpers
+- `deploy/` – ovault deploy + SimpleDVNMock/SimpleExecutorMock/DestinationExecutorMock
+- `devtools/` – `deployConfig.ts` (Hedera hub/Base spoke) and helpers
+- `config/` – LayerZero configs for assets/shares (Simple Worker ready)
+- `tasks/` – `lz:oft:send`, `lz:ovault:send`, Simple Worker helpers
 - `deployments/` – generated deployment artifacts per chain (Base Sepolia, Hedera testnet)
 
 ## Notes
 
-- Simple Workers need manual processing: use `lz:simple-workers:process-receive` (or `verify` + `commit` + `commit-and-execute`) on the destination chain if a message is pending. These tasks read your local `deployments/*` for contract addresses.
-- Simple Workers are **not** production-safe (no fees, manual verification). Use official executors/DVNs on mainnet.
-- Gas values in configs are conservative defaults; profile and tune for your contracts.
-- If you switch the hub/spoke topology, update `devtools/deployConfig.ts` and both LayerZero configs accordingly.
+- Testnets often lack default DVNs/executors, so we deploy Simple Worker mocks to exercise the flows. For mainnet, use the official contracts from LayerZero: https://docs.layerzero.network/v2/deployments/deployed-contracts?stages=mainnet
+- Gas values in configs are defaults; profile and tune for your contracts.
+- To change hub/spoke or add chains, update `devtools/deployConfig.ts` and regenerate wiring.

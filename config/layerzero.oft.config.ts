@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-
 import { createLogger } from '@layerzerolabs/io-devtools'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 import { ExecutorOptionType } from '@layerzerolabs/lz-v2-utilities'
@@ -8,30 +5,9 @@ import { IMetadata, TwoWayConfig, defaultFetchMetadata, generateConnectionsConfi
 import { OAppEnforcedOption } from '@layerzerolabs/toolbox-hardhat'
 
 import type { OmniPointHardhat } from '@layerzerolabs/toolbox-hardhat'
+import { loadDeploymentAddress } from './utils'
 
 const logger = createLogger()
-const deploymentsRoot = path.join(__dirname, 'deployments')
-
-const deploymentFolderByEid: Record<number, string> = {
-    [EndpointId.BASESEP_V2_TESTNET]: 'base-sepolia',
-    [EndpointId.HEDERA_V2_TESTNET]: 'hedera-testnet',
-}
-
-const loadDeploymentAddress = (eid: number, contractName: string): string => {
-    const networkFolder = deploymentFolderByEid[eid]
-    if (!networkFolder) {
-        throw new Error(`No deployment folder configured for eid ${eid}`)
-    }
-
-    const deploymentPath = path.join(deploymentsRoot, networkFolder, `${contractName}.json`)
-    const deploymentRaw = readFileSync(deploymentPath, 'utf8')
-    const deployment = JSON.parse(deploymentRaw)
-    if (!deployment.address) {
-        throw new Error(`Missing address for ${contractName} in ${deploymentPath}`)
-    }
-
-    return deployment.address
-}
 
 // ============================================================================
 // SECTION 1: CONTRACT DEFINITIONS - YOU MUST EDIT THIS

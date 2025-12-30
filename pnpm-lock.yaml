@@ -51,6 +51,9 @@ importers:
       '@layerzerolabs/oft-evm':
         specifier: ^4.0.0
         version: 4.0.0(d4b05a04eccff4974f38807f5095e48f)
+      '@layerzerolabs/ovault-evm':
+        specifier: ^1.0.0
+        version: 1.0.1(3d96b1f535601e0887b0298d530c25ad)
       '@layerzerolabs/prettier-config-next':
         specifier: ^2.3.39
         version: 2.3.44
@@ -507,6 +510,9 @@ packages:
   '@layerzerolabs/lz-definitions@3.0.146':
     resolution: {integrity: sha512-Qmzspe6zieaah3iWFDGYC74bOd1rfC6tca8ux4ph0a3YGSoLVPlZCedjKP2/k10qwVV4obs6TvB5orp6niu4pw==}
 
+  '@layerzerolabs/lz-definitions@3.0.151':
+    resolution: {integrity: sha512-IFhcq4xMl+go1QzmBDv3REntIuTpIVFDIYNqYQ4kS2agTeSI+drWV7LXZeqCRcV3gfu+v/OolJUiR8wEDKC3JA==}
+
   '@layerzerolabs/lz-evm-messagelib-v2@3.0.146':
     resolution: {integrity: sha512-XF8IRIVbW9YwAL6VwVJwDcEGGcOY7ruvmNl4dHAZJSSCWdb0ceMpf15zEAQj9s6aB4SIbAdgChkS5v+5gvgRBg==}
     peerDependencies:
@@ -548,6 +554,9 @@ packages:
   '@layerzerolabs/lz-v2-utilities@3.0.146':
     resolution: {integrity: sha512-KLPQ81c98JrbAUbtvEpXTeWubArWKXztabBpf7svdP7x4fGeQf+tyPLEENbo0O2TNczl0D7qB17o0UZ4n9v73A==}
 
+  '@layerzerolabs/lz-v2-utilities@3.0.151':
+    resolution: {integrity: sha512-yICMibA+NIDawCvkz1LRywtRXlP9ZoGqlFuWjuAVLWvKNiT7q2vloddprXqiLC06gAfgY6u/gGlHa9a/leG6KQ==}
+
   '@layerzerolabs/metadata-tools@3.0.2':
     resolution: {integrity: sha512-C+LcNFMDXcanDlCOaXm7UGeOObN947BbOCP5mfGkdnKGso1I3+Tak/1QpCRMWvcz1zfa4jikF5KQsfY5bJQD4Q==}
     peerDependencies:
@@ -570,6 +579,16 @@ packages:
       '@layerzerolabs/lz-evm-protocol-v2': ^3.0.75
       '@layerzerolabs/lz-evm-v1-0.7': ^3.0.75
       '@layerzerolabs/oapp-evm': ^0.4.0
+      '@openzeppelin/contracts': ^4.8.1 || ^5.0.0
+      '@openzeppelin/contracts-upgradeable': ^4.8.1 || ^5.0.0
+
+  '@layerzerolabs/ovault-evm@1.0.1':
+    resolution: {integrity: sha512-4kZhJEwVym1pJlG/50vJjxCAMJkaxIqT54jLmDWSXnA1mvaGuv6KjOYYtMa9BcspE9lxKcjwJPj68skL89lUPg==}
+    peerDependencies:
+      '@layerzerolabs/lz-evm-messagelib-v2': ^3.0.148
+      '@layerzerolabs/lz-evm-protocol-v2': ^3.0.148
+      '@layerzerolabs/lz-evm-v1-0.7': ^3.0.148
+      '@layerzerolabs/oapp-evm': ^0.4.1
       '@openzeppelin/contracts': ^4.8.1 || ^5.0.0
       '@openzeppelin/contracts-upgradeable': ^4.8.1 || ^5.0.0
 
@@ -599,6 +618,11 @@ packages:
       '@layerzerolabs/io-devtools': ~0.3.0
       '@layerzerolabs/lz-definitions': ^3.0.75
       zod: ^3.22.4
+
+  '@layerzerolabs/scan-client-v2@0.0.1':
+    resolution: {integrity: sha512-eugkDt4ajC5hqEHq23oTXMf28d5HrltapT7F5FIybluS8qAwJ5nc2Bbu9JRgUDdO8LQTQpi8AoVqnMbRumD4lA==}
+    peerDependencies:
+      redaxios: ^0.5.1
 
   '@layerzerolabs/script-devtools-evm-foundry@2.0.0':
     resolution: {integrity: sha512-pEmVLdFYewcB/ScNOQXNO4y09hwGRMLhZQufm4/o0k3FRAtWaGECRdwPESspRrlq83WUUFBxWDj2S5EspQk8Cw==}
@@ -3504,6 +3528,9 @@ packages:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
 
+  redaxios@0.5.1:
+    resolution: {integrity: sha512-FSD2AmfdbkYwl7KDExYQlVvIrFz6Yd83pGfaGjBzM9F6rpq8g652Q4Yq5QD4c+nf4g2AgeElv1y+8ajUPiOYMg==}
+
   reflect.getprototypeof@1.0.10:
     resolution: {integrity: sha512-00o4I+DVrefhv+nX0ulyi3biSHCPDe+yLv5o/p6d/UVlirijB8E16FtfwSAi4g3tcqrQ4lRAqQSoFEZJehYEcw==}
     engines: {node: '>= 0.4'}
@@ -5023,6 +5050,10 @@ snapshots:
     dependencies:
       tiny-invariant: 1.3.3
 
+  '@layerzerolabs/lz-definitions@3.0.151':
+    dependencies:
+      tiny-invariant: 1.3.3
+
   '@layerzerolabs/lz-evm-messagelib-v2@3.0.146(@axelar-network/axelar-gmp-sdk-solidity@5.10.0)(@chainlink/contracts-ccip@0.7.6(bufferutil@4.0.9)(ethers@5.8.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10))(@eth-optimism/contracts@0.6.0(bufferutil@4.0.9)(ethers@5.8.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10))(@layerzerolabs/lz-evm-protocol-v2@3.0.146(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10))(solidity-bytes-utils@0.8.4))(@layerzerolabs/lz-evm-v1-0.7@3.0.146(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10)))(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10))(solidity-bytes-utils@0.8.4)':
     dependencies:
       '@axelar-network/axelar-gmp-sdk-solidity': 5.10.0
@@ -5077,6 +5108,17 @@ snapshots:
       bs58: 5.0.0
       tiny-invariant: 1.3.3
 
+  '@layerzerolabs/lz-v2-utilities@3.0.151':
+    dependencies:
+      '@ethersproject/abi': 5.8.0
+      '@ethersproject/address': 5.8.0
+      '@ethersproject/bignumber': 5.8.0
+      '@ethersproject/bytes': 5.8.0
+      '@ethersproject/keccak256': 5.8.0
+      '@ethersproject/solidity': 5.8.0
+      bs58: 5.0.0
+      tiny-invariant: 1.3.3
+
   '@layerzerolabs/metadata-tools@3.0.2(@layerzerolabs/devtools-evm-hardhat@4.0.2(5aed0d220d101d43c35e394bf19ece18))(@layerzerolabs/ua-devtools@5.0.1(3048d6c840306bce6c267a329164c318))':
     dependencies:
       '@layerzerolabs/devtools-evm-hardhat': 4.0.2(5aed0d220d101d43c35e394bf19ece18)
@@ -5102,6 +5144,25 @@ snapshots:
       '@layerzerolabs/oapp-evm': 0.4.0(6374a602e9f36eb85a51ffdb28f7e4b1)
       '@openzeppelin/contracts': 5.4.0
       '@openzeppelin/contracts-upgradeable': 5.4.0(@openzeppelin/contracts@5.4.0)
+
+  '@layerzerolabs/ovault-evm@1.0.1(3d96b1f535601e0887b0298d530c25ad)':
+    dependencies:
+      '@layerzerolabs/lz-definitions': 3.0.151
+      '@layerzerolabs/lz-evm-messagelib-v2': 3.0.146(@axelar-network/axelar-gmp-sdk-solidity@5.10.0)(@chainlink/contracts-ccip@0.7.6(bufferutil@4.0.9)(ethers@5.8.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10))(@eth-optimism/contracts@0.6.0(bufferutil@4.0.9)(ethers@5.8.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10))(@layerzerolabs/lz-evm-protocol-v2@3.0.146(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10))(solidity-bytes-utils@0.8.4))(@layerzerolabs/lz-evm-v1-0.7@3.0.146(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10)))(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10))(solidity-bytes-utils@0.8.4)
+      '@layerzerolabs/lz-evm-protocol-v2': 3.0.146(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10))(solidity-bytes-utils@0.8.4)
+      '@layerzerolabs/lz-evm-v1-0.7': 3.0.146(@openzeppelin/contracts-upgradeable@5.4.0(@openzeppelin/contracts@5.4.0))(@openzeppelin/contracts@5.4.0)(hardhat-deploy@0.12.4(bufferutil@4.0.9)(utf-8-validate@5.0.10))
+      '@layerzerolabs/lz-v2-utilities': 3.0.151
+      '@layerzerolabs/oapp-evm': 0.4.0(6374a602e9f36eb85a51ffdb28f7e4b1)
+      '@layerzerolabs/scan-client-v2': 0.0.1(redaxios@0.5.1)
+      '@openzeppelin/contracts': 5.4.0
+      '@openzeppelin/contracts-upgradeable': 5.4.0(@openzeppelin/contracts@5.4.0)
+      redaxios: 0.5.1
+      viem: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
 
   '@layerzerolabs/prettier-config-next@2.3.44':
     dependencies:
@@ -5131,6 +5192,10 @@ snapshots:
       '@layerzerolabs/io-devtools': 0.3.1(ink-gradient@2.0.0(ink@3.2.0(bufferutil@4.0.9)(react@17.0.2)(utf-8-validate@5.0.10))(react@17.0.2))(ink-table@3.1.0(ink@3.2.0(bufferutil@4.0.9)(react@17.0.2)(utf-8-validate@5.0.10))(react@17.0.2))(ink@3.2.0(bufferutil@4.0.9)(react@17.0.2)(utf-8-validate@5.0.10))(react@17.0.2)(yoga-layout-prebuilt@1.10.0)(zod@3.25.76)
       '@layerzerolabs/lz-definitions': 3.0.146
       zod: 3.25.76
+
+  '@layerzerolabs/scan-client-v2@0.0.1(redaxios@0.5.1)':
+    dependencies:
+      redaxios: 0.5.1
 
   '@layerzerolabs/script-devtools-evm-foundry@2.0.0(f977c3d9624d79fea32d35fb1155f8bb)':
     dependencies:
@@ -5283,7 +5348,6 @@ snapshots:
   '@noble/curves@1.9.7':
     dependencies:
       '@noble/hashes': 1.8.0
-    optional: true
 
   '@noble/hashes@1.2.0': {}
 
@@ -5506,7 +5570,7 @@ snapshots:
 
   '@scure/bip32@1.7.0':
     dependencies:
-      '@noble/curves': 1.9.1
+      '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
 
@@ -8204,7 +8268,7 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.1.0(typescript@5.9.3)(zod@3.25.76)
+      abitype: 1.1.2(typescript@5.9.3)(zod@3.25.76)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.9.3
@@ -8457,6 +8521,8 @@ snapshots:
       picomatch: 2.3.1
 
   readdirp@4.1.2: {}
+
+  redaxios@0.5.1: {}
 
   reflect.getprototypeof@1.0.10:
     dependencies:

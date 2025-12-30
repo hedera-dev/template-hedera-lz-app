@@ -12,8 +12,9 @@ import { Options, addressToBytes32 } from '@layerzerolabs/lz-v2-utilities'
 import { DEPLOYMENT_CONFIG } from '../devtools/deployConfig'
 
 import { EvmArgs, sendEvm } from './sendEvm'
+import { noncePreflightCheck, triggerProcessReceive } from './simple-workers-mock/utils/common'
 import { SendResult } from './types'
-import { DebugLogger, KnownOutputs, getBlockExplorerLink } from './utils'
+import { DebugLogger, KnownOutputs, getBlockExplorerLink, getOftAddresses } from './utils'
 
 const logger = createLogger()
 
@@ -31,6 +32,8 @@ interface OVaultComposerArgs {
     lzComposeGas?: number
     lzComposeValue?: string
     oftAddress?: string // Override source OFT address
+    /** DEVELOPMENT ONLY: Enable SimpleDVN manual verification flow (not for mainnet use) */
+    simpleWorkers?: boolean
 }
 
 task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with automatic composeMsg creation')
@@ -47,13 +50,13 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
     .addOptionalParam(
         'assetOappConfig',
         'Path to the Asset OFT config file',
-        'config/layerzero.asset.config.ts',
+        'config/layerzero.ovault.config.ts',
         types.string
     )
     .addOptionalParam(
         'shareOappConfig',
         'Path to the Share OFT config file',
-        'config/layerzero.share.config.ts',
+        'config/layerzero.ovault.config.ts',
         types.string
     )
     .addOptionalParam(
@@ -76,6 +79,10 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         'Override the source local deployment OFT address (20-byte hex for EVM)',
         undefined,
         types.string
+    )
+    .addFlag(
+        'simpleWorkers',
+        'DEVELOPMENT ONLY: Enable SimpleWorkers manual verification and execution flow after sending (not for mainnet use)'
     )
     .setAction(async (args: OVaultComposerArgs, hre: HardhatRuntimeEnvironment) => {
         // Validate tokenType
@@ -112,6 +119,10 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
 
         const getHreByEid = createGetHreByEid(hre)
         const hubHre = await getHreByEid(hubEid)
+        let srcHre: HardhatRuntimeEnvironment | null = null
+        let dstHre: HardhatRuntimeEnvironment | null = null
+        let srcOftAddress: string | null = null
+        let dstOftAddress: string | null = null
 
         // Check if all chains are the same (hub) - if so, just do direct vault interaction
         if (args.srcEid === hubEid && args.dstEid === hubEid) {
@@ -234,8 +245,25 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             // Choose the appropriate config based on token type
             const configPath =
                 args.tokenType === 'asset'
-                    ? args.assetOappConfig || 'config/layerzero.asset.config.ts'
-                    : args.shareOappConfig || 'config/layerzero.share.config.ts'
+                    ? args.assetOappConfig || 'config/layerzero.ovault.config.ts'
+                    : args.shareOappConfig || 'config/layerzero.ovault.config.ts'
+
+            if (args.simpleWorkers) {
+                ;[dstHre, srcHre] = await Promise.all([getHreByEid(args.dstEid), getHreByEid(args.srcEid)])
+                if (!dstHre || !srcHre) {
+                    throw new Error('Failed to resolve Hardhat runtimes for src/dst EIDs')
+                }
+                const addrs = await getOftAddresses(
+                    args.srcEid,
+                    args.dstEid,
+                    configPath,
+                    (eid: number) => Promise.resolve(createGetHreByEid(hre)(eid)),
+                    args.oftAddress
+                )
+                srcOftAddress = addrs.srcOft
+                dstOftAddress = addrs.dstOft
+                await noncePreflightCheck(dstHre, srcOftAddress, dstOftAddress, args.srcEid)
+            }
 
             // Call the existing sendEvm function with no compose message
             const evmArgs: EvmArgs = {
@@ -279,6 +307,23 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
                 `LayerZero Scan link for tracking all cross-chain transaction details: ${result.scanLink}`
             )
 
+            if (args.simpleWorkers) {
+                if (!dstHre || !srcHre || !dstOftAddress || !srcOftAddress || !result.outboundNonce) {
+                    throw new Error('SimpleWorkers: Missing resolved hre or oft info')
+                }
+                await triggerProcessReceive(dstHre, srcHre, {
+                    srcEid: args.srcEid,
+                    dstEid: args.dstEid,
+                    to: args.to,
+                    amount: args.amount,
+                    outboundNonce: result.outboundNonce,
+                    srcOftAddress,
+                    dstOftAddress,
+                    dstContractName: undefined,
+                    extraOptions: result.extraOptions,
+                })
+            }
+
             // Early return - skip all composer logic
             return
         }
@@ -310,8 +355,25 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         // Choose the appropriate config based on token type
         const configPath =
             args.tokenType === 'asset'
-                ? args.assetOappConfig || 'config/layerzero.asset.config.ts'
-                : args.shareOappConfig || 'config/layerzero.share.config.ts'
+                ? args.assetOappConfig || 'config/layerzero.ovault.config.ts'
+                : args.shareOappConfig || 'config/layerzero.ovault.config.ts'
+
+        if (args.simpleWorkers) {
+            ;[dstHre, srcHre] = await Promise.all([getHreByEid(hubEid), getHreByEid(args.srcEid)])
+            if (!dstHre || !srcHre) {
+                throw new Error('Failed to resolve Hardhat runtimes for src/hub EIDs')
+            }
+            const addrs = await getOftAddresses(
+                args.srcEid,
+                hubEid,
+                configPath,
+                (eid: number) => Promise.resolve(createGetHreByEid(hre)(eid)),
+                args.oftAddress
+            )
+            srcOftAddress = addrs.srcOft
+            dstOftAddress = addrs.dstOft
+            await noncePreflightCheck(dstHre, srcOftAddress, dstOftAddress, args.srcEid)
+        }
 
         // Get vault address and call preview functions to determine output amounts
         const vaultDeployment = await hubHre.deployments.get('MyERC4626')
@@ -379,8 +441,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             // Determine which OFT to quote (opposite of what we're sending)
             const outputTokenConfig =
                 args.tokenType === 'asset'
-                    ? args.shareOappConfig || 'config/layerzero.share.config.ts' // Asset input → Share output
-                    : args.assetOappConfig || 'config/layerzero.asset.config.ts' // Share input → Asset output
+                    ? args.shareOappConfig || 'config/layerzero.ovault.config.ts' // Asset input → Share output
+                    : args.assetOappConfig || 'config/layerzero.ovault.config.ts' // Share input → Asset output
 
             const outputLayerZeroConfig = (await import(path.resolve('./', outputTokenConfig))).default
             const { contracts: outputContracts } =
@@ -491,4 +553,21 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             KnownOutputs.EXPLORER_LINK,
             `LayerZero Scan link for tracking all cross-chain transaction details: ${result.scanLink}`
         )
+
+        if (args.simpleWorkers) {
+            if (!dstHre || !srcHre || !dstOftAddress || !srcOftAddress || !result.outboundNonce) {
+                throw new Error('SimpleWorkers: Missing resolved hre or oft info')
+            }
+            await triggerProcessReceive(dstHre, srcHre, {
+                srcEid: args.srcEid,
+                dstEid: hubEid,
+                to: composerAddress,
+                amount: args.amount,
+                outboundNonce: result.outboundNonce,
+                srcOftAddress,
+                dstOftAddress,
+                dstContractName: undefined,
+                extraOptions: result.extraOptions,
+            })
+        }
     })
