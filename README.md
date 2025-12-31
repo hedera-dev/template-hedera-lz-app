@@ -55,9 +55,16 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 
 4. **Send tokens cross-chain (Base → Hedera or reverse)**
 
+Base → Hedera
+
 ```bash
-pnpm hardhat lz:oft:send --src-eid 40245 --dst-eid 40285 --amount 1 --to <EVM_ADDRESS> \
-  --oapp-config config/layerzero.asset.config.ts --simple-workers
+pnpm hardhat lz:oft:send --src-eid 40245 --dst-eid 40285 --amount 1 --to <EVM_ADDRESS> --simple-workers
+```
+
+Hedera → Base
+
+```bash
+pnpm hardhat lz:oft:send --src-eid 40285 --dst-eid 40245 --amount 1 --to <EVM_ADDRESS> --simple-workers
 ```
 
 If a message is pending, run on the destination chain:
@@ -78,16 +85,14 @@ Architecture: Hedera hosts the vault, adapter, composer, and an asset OFT. Base 
 2. **Deploy OVault stack**
 
 ```bash
-# Hedera (vault + adapter + composer + asset OFT)
-pnpm hardhat lz:deploy --tags ovault --network hedera-testnet
-# Base (share OFT + asset OFT)
-pnpm hardhat lz:deploy --tags ovault --network base-sepolia
+# Hedera (vault + adapter + composer + asset OFT) and Base (share OFT + asset OFT)
+pnpm hardhat lz:deploy --tags ovault
 ```
 
 3. **Wire OVault messaging (Simple Workers)**
 
 ```bash
-pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
+pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts # this technically isn't required because it was already wired in chapter 1
 pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.share.config.ts
 ```
 
@@ -105,6 +110,13 @@ pnpm hardhat lz:ovault:send --src-eid 40245 --dst-eid 40285 --amount 1 --to <EVM
 ```bash
 pnpm hardhat lz:ovault:send --src-eid 40285 --dst-eid 40245 --amount 1 --to <EVM_ADDRESS> \
   --token-type share --simple-workers
+```
+
+- Pay on Base, receive shares on Base (asset → share):
+
+```bash
+pnpm hardhat lz:ovault:send --src-eid 40245 --dst-eid 40245 --amount 1 --to <EVM_ADDRESS> \
+  --token-type asset --simple-workers
 ```
 
 If a message is pending, process on the destination chain with the Simple Worker tasks (same as Chapter 1).
