@@ -1,5 +1,6 @@
 import './sendOFT'
 import './sendOVaultComposer'
+import './strategyInvest'
 import './simple-workers-mock/commit'
 import './simple-workers-mock/commitAndExecute'
 import './simple-workers-mock/verify'
