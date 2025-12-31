@@ -9,6 +9,7 @@ import type { HardhatRuntimeEnvironment } from 'hardhat/types'
 
 const logger = createLogger()
 const ERC20_DECIMALS_ABI = ['function decimals() view returns (uint8)']
+const OFT_ADAPTER_ABI = ['function approvalRequired() view returns (bool)', 'function token() view returns (address)']
 
 export interface SimpleDvnMockTaskArgs {
     srcEid: number
@@ -49,10 +50,27 @@ export async function processMessage(dstOftContract: Contract, args: SimpleDvnMo
 
     // Get shared decimals from destination OFT contract
     const sharedDecimals: number = await dstOftContract.sharedDecimals()
-    // Get local decimals of current chain OFT
-    // Need to use ERC20 interface because IOFT doesn't have .decimals()
-    const erc20 = new Contract(dstOftContract.address, ERC20_DECIMALS_ABI, dstOftContract.provider)
-    const localDecimals = await erc20.decimals()
+    // Get local decimals of current chain OFT.
+    // If this is an adapter, pull decimals from the underlying ERC20.
+    let localDecimals = sharedDecimals
+    try {
+        let decimalsTarget = dstOftContract.address
+        try {
+            const oftAdapter = new Contract(dstOftContract.address, OFT_ADAPTER_ABI, dstOftContract.provider)
+            const approvalRequired = await oftAdapter.approvalRequired()
+            if (approvalRequired) {
+                decimalsTarget = await oftAdapter.token()
+            }
+        } catch (error) {
+            // Not an adapter; keep destination as the OFT itself.
+        }
+
+        const erc20 = new Contract(decimalsTarget, ERC20_DECIMALS_ABI, dstOftContract.provider)
+        localDecimals = await erc20.decimals()
+    } catch (error) {
+        logger.warn('Failed to read token decimals, falling back to sharedDecimals')
+        localDecimals = sharedDecimals
+    }
 
     // Parse amount using shared decimals
     const amountUnits = ethers.utils.parseUnits(amount, sharedDecimals)

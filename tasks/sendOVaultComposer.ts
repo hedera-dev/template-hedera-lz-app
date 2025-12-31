@@ -559,14 +559,18 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         // Quote the second hop (hub → destination) using hub chain RPC to get accurate compose value
         // Only needed if the final destination is not the hub itself
         let lzComposeValue = args.lzComposeValue || '0'
+        let outputTokenConfig: string | null = null
 
-        if (!args.lzComposeValue && args.dstEid !== hubEid) {
+        if (args.dstEid !== hubEid) {
             // Determine which OFT to quote (opposite of what we're sending)
-            const outputTokenConfig =
+            outputTokenConfig =
                 args.tokenType === 'asset'
                     ? args.shareOappConfig || 'config/layerzero.share.config.ts' // Asset input → Share output
                     : args.assetOappConfig || 'config/layerzero.asset.config.ts' // Share input → Asset output
+        }
 
+        if (!args.lzComposeValue && args.dstEid !== hubEid) {
+            
             const outputLayerZeroConfig = (await import(path.resolve('./', outputTokenConfig))).default
             const { contracts: outputContracts } =
                 typeof outputLayerZeroConfig === 'function' ? await outputLayerZeroConfig() : outputLayerZeroConfig
@@ -700,5 +704,43 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
                 composeGas: lzComposeGas.toString(),
                 composeValue: lzComposeValue,
             })
+
+            // If the final destination is not the hub, process the second hop (hub → destination).
+            if (args.dstEid !== hubEid) {
+                if (!outputTokenConfig) {
+                    throw new Error('SimpleWorkers: Missing output token config for second hop')
+                }
+
+                const dstHopHre = await getHreByEid(args.dstEid)
+                const outputAddrs = await getOftAddresses(
+                    hubEid,
+                    args.dstEid,
+                    outputTokenConfig,
+                    (eid: number) => Promise.resolve(createGetHreByEid(hre)(eid))
+                )
+
+                const endpointDeployment = await hubHre.deployments.get('EndpointV2')
+                const endpoint = new hubHre.ethers.Contract(
+                    endpointDeployment.address,
+                    endpointDeployment.abi,
+                    hubHre.ethers.provider
+                )
+                const dstWrapperBytes32 = hubHre.ethers.utils.hexZeroPad(outputAddrs.dstOft, 32)
+                const outboundNonce = await endpoint.outboundNonce(outputAddrs.srcOft, args.dstEid, dstWrapperBytes32)
+
+                const amountHuman = formatUnits(expectedOutputAmount, 18)
+
+                await triggerProcessReceive(dstHopHre, hubHre, {
+                    srcEid: hubEid,
+                    dstEid: args.dstEid,
+                    to: args.to,
+                    amount: amountHuman,
+                    outboundNonce: outboundNonce.toString(),
+                    srcOftAddress: outputAddrs.srcOft,
+                    dstOftAddress: outputAddrs.dstOft,
+                    dstContractName: undefined,
+                    extraOptions: secondHopSendParam.extraOptions,
+                })
+            }
         }
     })
