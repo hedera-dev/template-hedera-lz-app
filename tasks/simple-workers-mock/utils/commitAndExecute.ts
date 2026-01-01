@@ -100,7 +100,7 @@ export async function commitAndExecute(
         guid: guid,
         message: params.message,
         extraData: '0x',
-        gas: '200000',
+        gas: '1000000',
         value: '0',
     }
 

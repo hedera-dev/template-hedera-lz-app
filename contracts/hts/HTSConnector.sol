@@ -13,6 +13,7 @@ import "./KeyHelper.sol";
 abstract contract HTSConnector is OFTCore, KeyHelper, HederaTokenService {
     address public htsTokenAddress;
     bool public finiteTotalSupplyType = false;
+    uint8 decimals = 18;
     event TokenCreated(address tokenAddress);
 
     /**
@@ -27,7 +28,7 @@ abstract contract HTSConnector is OFTCore, KeyHelper, HederaTokenService {
         string memory _symbol,
         address _lzEndpoint,
         address _delegate
-    ) payable OFTCore(18, _lzEndpoint, _delegate) {
+    ) payable OFTCore(decimals, _lzEndpoint, _delegate) {
         IHederaTokenService.TokenKey[] memory keys = new IHederaTokenService.TokenKey[](1);
         keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.INHERIT_ACCOUNT_KEY, bytes(""));
 
@@ -55,8 +56,8 @@ abstract contract HTSConnector is OFTCore, KeyHelper, HederaTokenService {
 
         (int responseCode, address tokenAddress) = HederaTokenService.createFungibleToken(
             token,
-            1000,
-            int32(int256(uint256(8)))
+            0,
+            int32(int8(uint8(decimals)))
         );
         require(responseCode == HederaTokenService.SUCCESS_CODE, "Failed to create HTS token");
 
@@ -81,7 +82,7 @@ abstract contract HTSConnector is OFTCore, KeyHelper, HederaTokenService {
      * @return requiresApproval Needs approval of the underlying token implementation.
      */
     function approvalRequired() external pure virtual returns (bool) {
-        return false;
+        return true;
     }
 
     /**
