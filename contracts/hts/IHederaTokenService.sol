@@ -153,6 +153,19 @@ interface IHederaTokenService {
         int64 amount
     ) external returns (int64 responseCode);
 
+    /// Associate a Hedera account with a token.
+    /// @param account The account to associate.
+    /// @param token The token to associate.
+    /// @return responseCode The response code for the status of the request. SUCCESS is 22.
+    function associateToken(address account, address token) external returns (int64 responseCode);
+
+    /// Approve allowance for a spender to transfer fungible tokens.
+    /// @param token The token to approve allowance for.
+    /// @param spender The spender to approve.
+    /// @param amount The allowance amount (in the token's smallest unit).
+    /// @return responseCode The response code for the status of the request. SUCCESS is 22.
+    function approve(address token, address spender, uint256 amount) external returns (int64 responseCode);
+
     /// Operation to update token keys
     /// @param token The token address
     /// @param keys The token keys

@@ -8,6 +8,7 @@ abstract contract HederaTokenService {
     // all response codes are defined here https://github.com/hashgraph/hedera-smart-contracts/blob/main/contracts/system-contracts/HederaResponseCodes.sol
     int32 constant UNKNOWN_CODE = 21;
     int32 constant SUCCESS_CODE = 22;
+    int32 constant TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT = 194;
 
     address constant precompileAddress = address(0x167);
     // 90 days in seconds
@@ -110,6 +111,29 @@ abstract contract HederaTokenService {
     ) internal returns (int responseCode) {
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.transferToken.selector, token, sender, receiver, amount)
+        );
+        responseCode = success ? abi.decode(result, (int32)) : HederaTokenService.UNKNOWN_CODE;
+    }
+
+    /// Associate a Hedera account with a token.
+    /// @param account The account to associate.
+    /// @param token The token to associate.
+    /// @return responseCode The response code for the status of the request.
+    function associateToken(address account, address token) internal returns (int responseCode) {
+        (bool success, bytes memory result) = precompileAddress.call(
+            abi.encodeWithSelector(IHederaTokenService.associateToken.selector, account, token)
+        );
+        responseCode = success ? abi.decode(result, (int32)) : HederaTokenService.UNKNOWN_CODE;
+    }
+
+    /// Approve allowance for a spender to transfer fungible tokens.
+    /// @param token The token to approve allowance for.
+    /// @param spender The spender to approve.
+    /// @param amount The allowance amount (in the token's smallest unit).
+    /// @return responseCode The response code for the status of the request.
+    function approve(address token, address spender, uint256 amount) internal returns (int responseCode) {
+        (bool success, bytes memory result) = precompileAddress.call(
+            abi.encodeWithSelector(IHederaTokenService.approve.selector, token, spender, amount)
         );
         responseCode = success ? abi.decode(result, (int32)) : HederaTokenService.UNKNOWN_CODE;
     }

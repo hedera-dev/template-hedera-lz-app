@@ -76,8 +76,9 @@ const deploy: DeployFunction = async (hre) => {
 
     // Deploy Vault Chain Components (vault, adapter, composer)
     if (isVaultChain(networkEid)) {
-        // Get asset address (existing or deployed)
+        // Get asset OFT address (existing or deployed)
         let assetOFTAddress: string
+        let assetTokenAddress: string
 
         if (DEPLOYMENT_CONFIG.vault.assetOFTAddress) {
             assetOFTAddress = DEPLOYMENT_CONFIG.vault.assetOFTAddress
@@ -87,12 +88,14 @@ const deploy: DeployFunction = async (hre) => {
             assetOFTAddress =
                 deployedContracts.assetOFT || (await hre.deployments.get(DEPLOYMENT_CONFIG.assetOFT.contract)).address
             console.log(`Using deployed asset address: ${assetOFTAddress}`)
-            // Fetch underlying ERC20 token address from the OFT using the IOFT artifact
-            const IOFTArtifact = await hre.artifacts.readArtifact('IOFT')
-            const oftContract = await hre.ethers.getContractAt(IOFTArtifact.abi, assetOFTAddress)
-            const assetTokenAddress = await oftContract.token()
-            console.log(`Underlying ERC20 token address found from OFT deployment: ${assetTokenAddress}`)
         }
+
+        // Fetch underlying token address from the OFT using the IOFT artifact.
+        // For HTSConnector, this is the HTS token address used as the vault asset.
+        const IOFTArtifact = await hre.artifacts.readArtifact('IOFT')
+        const oftContract = await hre.ethers.getContractAt(IOFTArtifact.abi, assetOFTAddress)
+        assetTokenAddress = await oftContract.token()
+        console.log(`Underlying asset token address found from OFT deployment: ${assetTokenAddress}`)
 
         // Get vault address (existing or deploy new)
         let vaultAddress: string
@@ -107,7 +110,7 @@ const deploy: DeployFunction = async (hre) => {
                 args: [
                     DEPLOYMENT_CONFIG.shareOFT.metadata.name,
                     DEPLOYMENT_CONFIG.shareOFT.metadata.symbol,
-                    assetOFTAddress,
+                    assetTokenAddress,
                 ],
                 log: true,
                 skipIfAlreadyDeployed: true,
@@ -144,8 +147,9 @@ const deploy: DeployFunction = async (hre) => {
         const composer = await deployments.deploy(DEPLOYMENT_CONFIG.vault.contracts.composer, {
             from: deployer,
             args: [vaultAddress, assetOFTAddress, shareAdapterAddress],
+            gasLimit: '4000000',
             log: true,
-            skipIfAlreadyDeployed: true,
+            skipIfAlreadyDeployed: false,
         })
         console.log(
             `Deployed contract: ${DEPLOYMENT_CONFIG.vault.contracts.composer}, network: ${hre.network.name}, address: ${composer.address}`
