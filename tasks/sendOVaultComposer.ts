@@ -24,6 +24,8 @@ interface OVaultComposerArgs {
     amount: string // amount to send
     to: string // receiver wallet address
     tokenType: 'asset' | 'share' // Whether we're sending asset or share
+    composerContract?: string // OVault composer contract name
+    vaultContract?: string // Vault contract name for hub-only flows
     assetOappConfig?: string // Path to asset OFT config
     shareOappConfig?: string // Path to share OFT config
     minAmount?: string
@@ -45,6 +47,18 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         'tokenType',
         'Token type to send: "asset" (to get shares) or "share" (to get assets)',
         undefined,
+        types.string
+    )
+    .addOptionalParam(
+        'composerContract',
+        'OVault composer contract name (default: MyOVaultComposer)',
+        'MyOVaultComposer',
+        types.string
+    )
+    .addOptionalParam(
+        'vaultContract',
+        'Vault contract name for hub-only flows (default: MyERC4626)',
+        'MyERC4626',
         types.string
     )
     .addOptionalParam(
@@ -132,7 +146,7 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             )
 
             // Get vault address and create contract instance
-            const vaultDeployment = await hubHre.deployments.get('MyERC4626')
+            const vaultDeployment = await hubHre.deployments.get(args.vaultContract ?? 'MyERC4626')
             const vaultAddress = vaultDeployment.address
             const hubSigner = (await hubHre.ethers.getSigners())[0]
 
@@ -332,7 +346,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
 
         // If we're on the hub and sending shares, redeem locally and send assets to destination.
         if (args.srcEid === hubEid && args.tokenType === 'share') {
-            const composerDeployment = await hubHre.deployments.get('MyOVaultComposer')
+            const composerContractName = args.composerContract ?? 'MyOVaultComposer'
+            const composerDeployment = await hubHre.deployments.get(composerContractName)
             const composerAddress = composerDeployment.address
             const hubSigner = (await hubHre.ethers.getSigners())[0]
 
@@ -396,7 +411,7 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             )
 
             const composer = await hubHre.ethers.getContractAt(
-                await hubHre.artifacts.readArtifact('MyOVaultComposer').then((a) => a.abi),
+                await hubHre.artifacts.readArtifact(composerContractName).then((a) => a.abi),
                 composerAddress,
                 hubSigner
             )
@@ -451,7 +466,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         }
 
         // Get OVaultComposer address from deployments on HUB
-        const composerDeployment = await hubHre.deployments.get('MyOVaultComposer')
+        const composerContractName = args.composerContract ?? 'MyOVaultComposer'
+        const composerDeployment = await hubHre.deployments.get(composerContractName)
         const composerAddress = composerDeployment.address
 
         // Set gas limits based on whether destination is hub chain

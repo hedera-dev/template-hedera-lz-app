@@ -1,6 +1,6 @@
 import path from 'path'
 
-import { BigNumber, Contract, ContractTransaction } from 'ethers'
+import { BigNumber, Contract, ContractTransaction, constants } from 'ethers'
 import { parseUnits } from 'ethers/lib/utils'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 
@@ -104,20 +104,47 @@ export async function sendEvm(
     // We'll get the actual outbound nonce after the transaction is sent
     const dstWrapperBytes32 = addressToBytes32(dstWrapperAddress)
 
-    // 3️⃣ fetch the underlying ERC-20
+    // 3️⃣ fetch the underlying token (address(0) for native)
     const underlying = await oft.token()
+    const isNative = underlying.toLowerCase() === constants.AddressZero.toLowerCase()
 
     // 4️⃣ fetch decimals from the underlying token
-    const erc20 = await srcEidHre.ethers.getContractAt('ERC20', underlying, signer)
-    const decimals: number = await erc20.decimals()
+    let erc20: Contract | null = null
+    let decimals: number
+    if (isNative) {
+        decimals = 18
+    } else {
+        erc20 = await srcEidHre.ethers.getContractAt('ERC20', underlying, signer)
+        decimals = await erc20.decimals()
+    }
 
     // 5️⃣ normalize the user-supplied amount
-    const amountUnits: BigNumber = parseUnits(amount, decimals)
+    let amountUnits: BigNumber = parseUnits(amount, decimals)
+    let minAmountUnits: BigNumber | null = minAmount ? parseUnits(minAmount, decimals) : null
+
+    if (isNative) {
+        const sharedDecimals = await oft.sharedDecimals()
+        const conversionRate = BigNumber.from(10).pow(decimals - sharedDecimals)
+        const dust = amountUnits.mod(conversionRate)
+        if (!dust.isZero()) {
+            const dustFree = amountUnits.sub(dust)
+            logger.warn(
+                `Native OFT amount has dust; truncating from ${amountUnits.toString()} to ${dustFree.toString()}`
+            )
+            amountUnits = dustFree
+            if (minAmountUnits && minAmountUnits.gt(amountUnits)) {
+                minAmountUnits = amountUnits
+            }
+        }
+    }
 
     // 6️⃣ Check if approval is required (for OFT Adapters) and handle approval
     try {
         const approvalRequired = await oft.approvalRequired()
         if (approvalRequired) {
+            if (!erc20) {
+                throw new Error('Approval required but underlying token is native')
+            }
             logger.info('OFT Adapter detected - checking ERC20 allowance...')
 
             // Check current allowance
@@ -245,7 +272,7 @@ export async function sendEvm(
         dstEid,
         to: toBytes,
         amountLD: amountUnits.toString(),
-        minAmountLD: minAmount ? parseUnits(minAmount, decimals).toString() : amountUnits.toString(),
+        minAmountLD: (minAmountUnits ?? amountUnits).toString(),
         extraOptions: extraOptions,
         composeMsg: composeMsg ? composeMsg.toString() : '0x',
         oftCmd: '0x',
@@ -268,9 +295,10 @@ export async function sendEvm(
 
     logger.info('Sending the transaction...')
     let tx: ContractTransaction
+    const msgValue = isNative ? msgFee.nativeFee.add(amountUnits) : msgFee.nativeFee
     try {
         tx = await oft.send(sendParam, msgFee, signer.address, {
-            value: msgFee.nativeFee,
+            value: msgValue,
         })
     } catch (error) {
         DebugLogger.printErrorAndFixSuggestion(

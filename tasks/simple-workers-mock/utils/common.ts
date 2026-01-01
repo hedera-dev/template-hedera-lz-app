@@ -9,7 +9,8 @@ import type { HardhatRuntimeEnvironment } from 'hardhat/types'
 
 const logger = createLogger()
 const ERC20_DECIMALS_ABI = ['function decimals() view returns (uint8)']
-const OFT_ADAPTER_ABI = ['function approvalRequired() view returns (bool)', 'function token() view returns (address)']
+const OFT_INFO_ABI = ['function approvalRequired() view returns (bool)', 'function token() view returns (address)']
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 export interface SimpleDvnMockTaskArgs {
     srcEid: number
@@ -54,19 +55,15 @@ export async function processMessage(dstOftContract: Contract, args: SimpleDvnMo
     // If this is an adapter, pull decimals from the underlying ERC20.
     let localDecimals = sharedDecimals
     try {
-        let decimalsTarget = dstOftContract.address
-        try {
-            const oftAdapter = new Contract(dstOftContract.address, OFT_ADAPTER_ABI, dstOftContract.provider)
-            const approvalRequired = await oftAdapter.approvalRequired()
-            if (approvalRequired) {
-                decimalsTarget = await oftAdapter.token()
-            }
-        } catch (error) {
-            // Not an adapter; keep destination as the OFT itself.
-        }
+        const oftInfo = new Contract(dstOftContract.address, OFT_INFO_ABI, dstOftContract.provider)
+        const tokenAddress = await oftInfo.token()
 
-        const erc20 = new Contract(decimalsTarget, ERC20_DECIMALS_ABI, dstOftContract.provider)
-        localDecimals = await erc20.decimals()
+        if (tokenAddress.toLowerCase() === ZERO_ADDRESS) {
+            localDecimals = 18
+        } else {
+            const erc20 = new Contract(tokenAddress, ERC20_DECIMALS_ABI, dstOftContract.provider)
+            localDecimals = await erc20.decimals()
+        }
     } catch (error) {
         logger.warn('Failed to read token decimals, falling back to sharedDecimals')
         localDecimals = sharedDecimals

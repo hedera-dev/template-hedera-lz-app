@@ -73,7 +73,7 @@ export async function processReceive(
                 dstEid: dstEidStr,
                 guid: guid,
                 extraData: '0x',
-                gas: '200000',
+                gas: '3000000',
                 value: '0',
                 nativeDrops: nativeDropsHex,
             },

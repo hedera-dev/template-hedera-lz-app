@@ -12,12 +12,12 @@ const logger = createLogger()
 // Asset OFT mesh (shared between Chapter 1 and OVault asset flows)
 const hederaAssetOft: OmniPointHardhat = {
     eid: EndpointId.HEDERA_V2_TESTNET,
-    contractName: 'MyOFT',
+    contractName: 'MyHTSConnector',
 }
 
 const baseAssetOft: OmniPointHardhat = {
     eid: EndpointId.BASESEP_V2_TESTNET,
-    contractName: 'MyOFT',
+    contractName: 'MyNativeOFTAdapter',
 }
 
 const EVM_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
