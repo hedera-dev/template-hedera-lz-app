@@ -31,12 +31,12 @@ export const DEPLOYMENT_CONFIG_STRATEGY: DeploymentConfig = {
         deploymentEids: _spokeEids,
     },
     assetOFT: {
-        contract: 'MyOFT',
+        contract: 'MyHTSConnector',
         metadata: {
-            name: 'MyOFT',
-            symbol: 'MOFT',
+            name: 'WETH',
+            symbol: 'WETH',
         },
-        deploymentEids: [_hubEid, ..._spokeEids],
+        deploymentEids: [_hubEid],
     },
 } as const
 

@@ -70,6 +70,7 @@ const deploy: DeployFunction = async (hre) => {
 
     if (isVaultChainStrategy(networkEid)) {
         let assetOFTAddress: string
+        let assetTokenAddress: string
 
         if (DEPLOYMENT_CONFIG_STRATEGY.vault.assetOFTAddress) {
             assetOFTAddress = DEPLOYMENT_CONFIG_STRATEGY.vault.assetOFTAddress
@@ -80,6 +81,11 @@ const deploy: DeployFunction = async (hre) => {
                 (await hre.deployments.get(DEPLOYMENT_CONFIG_STRATEGY.assetOFT.contract)).address
             console.log(`Using deployed asset address: ${assetOFTAddress}`)
         }
+
+        const IOFTArtifact = await hre.artifacts.readArtifact('IOFT')
+        const oftContract = await hre.ethers.getContractAt(IOFTArtifact.abi, assetOFTAddress)
+        assetTokenAddress = await oftContract.token()
+        console.log(`Underlying asset token address found from OFT deployment: ${assetTokenAddress}`)
 
         let vaultAddress: string
         if (DEPLOYMENT_CONFIG_STRATEGY.vault.vaultAddress) {
@@ -92,7 +98,7 @@ const deploy: DeployFunction = async (hre) => {
                 args: [
                     DEPLOYMENT_CONFIG_STRATEGY.shareOFT.metadata.name,
                     DEPLOYMENT_CONFIG_STRATEGY.shareOFT.metadata.symbol,
-                    assetOFTAddress,
+                    assetTokenAddress,
                     strategyAddress,
                     deployer,
                 ],
