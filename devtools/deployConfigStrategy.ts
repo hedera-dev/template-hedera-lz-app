@@ -15,7 +15,7 @@ export const DEPLOYMENT_CONFIG_STRATEGY: DeploymentConfig = {
         deploymentEid: _hubEid,
         contracts: {
             vault: 'MyERC4626Strategy',
-            shareAdapter: 'MyShareOFTAdapter',
+            shareAdapter: 'MyShareOFTAdapterStrategy',
             composer: 'MyOVaultComposerStrategy',
         },
         vaultAddress: undefined,

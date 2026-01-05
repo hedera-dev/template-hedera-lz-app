@@ -48,13 +48,7 @@ contract HederaEtfStrategy is Ownable, HederaTokenService {
     event Invested(address indexed caller, uint256 amountIn, uint256 hbarOut, uint256 hustlersOut);
     event Divested(address indexed caller, uint256 hbarIn, uint256 hustlersIn, uint256 assetOut);
 
-    constructor(
-        address _asset,
-        address _hustlers,
-        address _whbar,
-        address _router,
-        address _owner
-    ) Ownable(_owner) {
+    constructor(address _asset, address _hustlers, address _whbar, address _router, address _owner) Ownable(_owner) {
         require(_asset != address(0), "asset=0");
         require(_hustlers != address(0), "hustlers=0");
         require(_whbar != address(0), "whbar=0");
@@ -85,11 +79,10 @@ contract HederaEtfStrategy is Ownable, HederaTokenService {
      * @param amountIn Total asset amount (smallest units) to invest.
      * @param deadline Unix timestamp after which the swap will revert.
      */
-    function invest(uint256 amountIn, uint256 deadline)
-        external
-        onlyOwner
-        returns (uint256 hbarOut, uint256 hustlersOut)
-    {
+    function invest(
+        uint256 amountIn,
+        uint256 deadline
+    ) external onlyOwner returns (uint256 hbarOut, uint256 hustlersOut) {
         require(amountIn > 0, "amountIn=0");
 
         asset.safeTransferFrom(msg.sender, address(this), amountIn);
@@ -174,10 +167,12 @@ contract HederaEtfStrategy is Ownable, HederaTokenService {
 
     function _approveToken(address token, address spender, uint256 amount) private {
         uint256 allowance = amount;
-        if (allowance > uint256(type(int64).max)) {
-            allowance = uint256(type(int64).max);
+        if (allowance > uint64(type(int64).max)) {
+            // Hedera HTS max supply is 2^63 - 1
+            allowance = uint64(type(int64).max);
         }
-        int responseCode = approve(token, spender, allowance);
-        require(responseCode == SUCCESS_CODE, "HTS: approve failed");
+        IERC20(token).forceApprove(spender, allowance);
+        // int responseCode = approve(token, spender, allowance);
+        // require(responseCode == SUCCESS_CODE, "HTS: approve failed");
     }
 }

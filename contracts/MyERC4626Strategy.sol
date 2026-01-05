@@ -27,7 +27,7 @@ contract MyERC4626Strategy is ERC4626, Ownable, HederaTokenService {
     using SafeERC20 for IERC20;
 
     IHederaEtfStrategy public strategy;
-    bool public autoInvest;
+    bool public autoInvest = true;
     uint256 public investDeadlineSeconds;
     uint256 public investedAssets;
 
@@ -43,6 +43,11 @@ contract MyERC4626Strategy is ERC4626, Ownable, HederaTokenService {
         address _owner
     ) ERC20(_name, _symbol) ERC4626(_asset) Ownable(_owner) {
         investDeadlineSeconds = 600;
+        int responseCode = associateToken(address(this), address(_asset));
+        require(
+            responseCode == SUCCESS_CODE || responseCode == TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT,
+            "HTS: asset association failed"
+        );
         if (_strategy != address(0)) {
             _setStrategy(_strategy);
         }
@@ -91,9 +96,8 @@ contract MyERC4626Strategy is ERC4626, Ownable, HederaTokenService {
     function _setStrategy(address _strategy) internal {
         require(_strategy != address(0), "strategy=0");
         strategy = IHederaEtfStrategy(_strategy);
-        uint256 allowance = uint256(type(int64).max);
-        int responseCode = approve(address(asset()), _strategy, allowance);
-        require(responseCode == SUCCESS_CODE, "HTS: approve strategy failed");
+        uint256 allowance = uint64(type(int64).max); // Hedera HTS max supply is 2^63 - 1
+        IERC20(address(asset())).forceApprove(_strategy, allowance);
         emit StrategyUpdated(_strategy);
     }
 

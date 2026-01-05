@@ -78,7 +78,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
         )
         await router.addLiquidityETHNewPool(wethToken, wethLiquidity, 0, 0, deployer, deadline, {
             value: totalHbar,
-            gasLimit: addLiquidityETHNewPoolGas.mul(1.2),
+            gasLimit: addLiquidityETHNewPoolGas.mul(12).div(10),
         })
 
         const addLiquidityNewPoolGas = await router.estimateGas.addLiquidityNewPool(

@@ -351,7 +351,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
             const composerAddress = composerDeployment.address
             const hubSigner = (await hubHre.ethers.getSigners())[0]
 
-            const vaultDeployment = await hubHre.deployments.get('MyERC4626')
+            const vaultContractName = args.vaultContract ?? 'MyERC4626'
+            const vaultDeployment = await hubHre.deployments.get(vaultContractName)
             const vaultAddress = vaultDeployment.address
             const ierc4626Artifact = await hubHre.artifacts.readArtifact('IERC4626')
             const vault = await hubHre.ethers.getContractAt(ierc4626Artifact.abi, vaultAddress, hubSigner)
@@ -515,7 +516,8 @@ task('lz:ovault:send', 'Sends assets or shares through OVaultComposer with autom
         }
 
         // Get vault address and call preview functions to determine output amounts
-        const vaultDeployment = await hubHre.deployments.get('MyERC4626')
+        const vaultContractName = args.vaultContract ?? 'MyERC4626'
+        const vaultDeployment = await hubHre.deployments.get(vaultContractName)
         const vaultAddress = vaultDeployment.address
         const hubSigner = (await hubHre.ethers.getSigners())[0]
 

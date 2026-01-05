@@ -1,6 +1,11 @@
 import assert from 'assert'
+import fs from 'fs'
+import path from 'path'
 
 import { type DeployFunction } from 'hardhat-deploy/types'
+import { EndpointId } from '@layerzerolabs/lz-definitions'
+
+import { loadDeploymentAddress } from '../config/utils'
 
 const deploy: DeployFunction = async (hre) => {
     const { getNamedAccounts, deployments } = hre
@@ -8,15 +13,24 @@ const deploy: DeployFunction = async (hre) => {
 
     assert(deployer, 'Missing named deployer account')
 
-    const asset = process.env.STRATEGY_ASSET
-    const hustlers = process.env.STRATEGY_HUSTLERS
-    const whbar = process.env.STRATEGY_WHBAR
-    const router = process.env.STRATEGY_ROUTER
+    const configPath = path.resolve(process.cwd(), 'env/addresses.testnet.json')
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    const addresses = config['hedera-testnet']
 
-    assert(asset, 'Missing STRATEGY_ASSET')
-    assert(hustlers, 'Missing STRATEGY_HUSTLERS')
-    assert(whbar, 'Missing STRATEGY_WHBAR')
-    assert(router, 'Missing STRATEGY_ROUTER')
+    assert(addresses, 'Missing hedera-testnet addresses config')
+    assert(addresses.routerV1, 'Missing routerV1 in addresses config')
+    assert(addresses.whbarToken, 'Missing whbarToken in addresses config')
+    assert(addresses.hustlersToken, 'Missing hustlersToken in addresses config')
+
+    const connectorAddress = loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'MyHTSConnector')
+    const ioftArtifact = await hre.artifacts.readArtifact('IOFT')
+    const oft = await hre.ethers.getContractAt(ioftArtifact.abi, connectorAddress)
+    const assetToken = await oft.token()
+
+    const asset = assetToken
+    const hustlers = addresses.hustlersToken
+    const whbar = addresses.whbarToken
+    const router = addresses.routerV1
 
     await deployments.deploy('HederaEtfStrategy', {
         from: deployer,

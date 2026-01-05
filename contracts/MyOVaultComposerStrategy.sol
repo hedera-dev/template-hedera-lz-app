@@ -25,7 +25,10 @@ contract MyOVaultComposerStrategy is VaultComposerSync, HederaTokenService {
             revert("HTS: Association failed");
         }
 
-        uint256 maxAllowance = uint256(type(int64).max);
+        // we could use IERC20 interface to interact with HTS FT, like ./MyOVaultComposerStrategy.sol
+        // but, we are already importing HTS System Contracts so may as well save the extra imports
+
+        uint256 maxAllowance = uint64(type(int64).max);
         if (IOFT(ASSET_OFT).approvalRequired()) {
             responseCode = approve(assetERC20, ASSET_OFT, maxAllowance);
             if (responseCode != SUCCESS_CODE) {

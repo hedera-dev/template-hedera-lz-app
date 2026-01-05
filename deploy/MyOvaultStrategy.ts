@@ -92,7 +92,11 @@ const deploy: DeployFunction = async (hre) => {
             vaultAddress = DEPLOYMENT_CONFIG_STRATEGY.vault.vaultAddress
             console.log(`Using existing vault address: ${vaultAddress}`)
         } else {
-            const strategyAddress = process.env.STRATEGY_ADDRESS || ZERO_ADDRESS
+            const strategyDeployment = await deployments.getOrNull('HederaEtfStrategy')
+            const strategyAddress = strategyDeployment?.address ?? ZERO_ADDRESS
+            if (strategyAddress === ZERO_ADDRESS) {
+                console.log('Strategy not deployed yet; vault will start without strategy configured')
+            }
             const vault = await deployments.deploy(DEPLOYMENT_CONFIG_STRATEGY.vault.contracts.vault, {
                 from: deployer,
                 args: [
@@ -140,16 +144,6 @@ const deploy: DeployFunction = async (hre) => {
         console.log(
             `Deployed contract: ${DEPLOYMENT_CONFIG_STRATEGY.vault.contracts.composer}, network: ${hre.network.name}, address: ${composer.address}`
         )
-
-        if (process.env.STRATEGY_ADDRESS && process.env.STRATEGY_AUTO_INVEST === 'true') {
-            const vaultContract = await hre.ethers.getContractAt(
-                DEPLOYMENT_CONFIG_STRATEGY.vault.contracts.vault,
-                vaultAddress
-            )
-            const tx = await vaultContract.setAutoInvest(true)
-            await tx.wait()
-            console.log('Auto-invest enabled on strategy vault')
-        }
 
         deployedContracts.vault = vaultAddress
         deployedContracts.shareAdapter = shareAdapterAddress
