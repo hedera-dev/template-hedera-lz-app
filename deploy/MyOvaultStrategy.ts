@@ -7,7 +7,7 @@ import {
     isVaultChainStrategy,
     shouldDeployAssetStrategy,
     shouldDeployShareStrategy,
-} from '../devtools/deployConfigStrategy'
+} from '../devtools'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 

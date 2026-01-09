@@ -3,80 +3,95 @@ import { EndpointId } from '@layerzerolabs/lz-definitions'
 import { DeploymentConfig } from './types'
 
 // ============================================
-// OVault Deployment Configuration
-// npx hardhat lz:deploy --tags ovault
+// Unified Deployment Configuration
 // ============================================
 //
-// DEFAULT: You have an ERC4626 vault and assetOFT deployed
-// - Set vault.vaultAddress to your existing vault
-// - Set vault.assetOFTAddress to your existing asset OFT
-// - ShareAdapter, ShareOFT, and Composer will be deployed to integrate with LayerZero
+// This file configures deployments for both:
+// - Chapter 2: Basic OVault (tag: ovault)
+// - Chapter 3: Strategy OVault (tag: ovault-strategy)
 //
-// ALTERNATIVE SCENARIOS:
-// - New vault, existing asset: Set only assetOFTAddress
-// - New vault, new asset: Leave both addresses undefined
+// Hub/Spoke Architecture:
+// - Hub (Hedera): Vault, ShareAdapter, Composer, HTSConnector
+// - Spoke (Base): ShareOFT, NativeOFTAdapter
 // ============================================
 
-// Define the chains we're deploying to
-// - _hubEid: The hub chain (where the OVault [ERC4626, ShareOFTAdapter, Composer] is deployed)
-// - _spokeEids: The spoke chains (where the ShareOFT is deployed)
-// Hedera acts as the hub to highlight Hedera-first wiring; Base is the spoke.
-const _hubEid = EndpointId.HEDERA_V2_TESTNET
-const _spokeEids = [EndpointId.BASESEP_V2_TESTNET]
+const HUB_EID = EndpointId.HEDERA_V2_TESTNET
+const SPOKE_EIDS = [EndpointId.BASESEP_V2_TESTNET]
 
 // ============================================
-// Deployment Export
-// ============================================
-//
-// This is the configuration for the deployment of the OVault.
-//
+// Chapter 2: Basic OVault Configuration
 // ============================================
 export const DEPLOYMENT_CONFIG: DeploymentConfig = {
-    // Vault chain configuration (where the ERC4626 vault lives)
     vault: {
-        deploymentEid: _hubEid,
+        deploymentEid: HUB_EID,
         contracts: {
             vault: 'MyERC4626',
             shareAdapter: 'MyShareOFTAdapter',
             composer: 'MyOVaultComposer',
         },
-        // IF YOU HAVE EXISTING CONTRACTS, SET THE ADDRESSES HERE
-        // This will skip deployment and use your existing hubEid contract deployments instead
-        // This must be the address of the ERC4626 vault
-        vaultAddress: undefined, // Set to '0xabc...' to use existing vault
-        // This must be the address of the asset OFT (not all OFT addresses are the same as the ERC20 contract)
-        assetOFTAddress: undefined, // Set to '0xdef...' to use existing asset OFT
-        // This must be the address of the ShareOFTAdapter
-        shareOFTAdapterAddress: undefined, // Set to '0xghi...' to use existing ShareOFTAdapter
+        // Set these to use existing contracts instead of deploying new ones
+        vaultAddress: undefined,
+        assetOFTAddress: undefined,
+        shareOFTAdapterAddress: undefined,
     },
-
-    // Share OFT configuration (only on spoke chains)
     shareOFT: {
         contract: 'MyShareOFT',
-        metadata: {
-            name: 'MyShareOFT',
-            symbol: 'SHARE',
-        },
-        deploymentEids: _spokeEids,
+        metadata: { name: 'MyShareOFT', symbol: 'SHARE' },
+        deploymentEids: SPOKE_EIDS,
     },
-
-    // Asset OFT configuration (deployed on specified chains OR use existing address)
     assetOFT: {
         contract: 'MyHTSConnector',
-        metadata: {
-            name: 'WETH',
-            symbol: 'WETH',
-        },
-        deploymentEids: [_hubEid],
+        metadata: { name: 'WETH', symbol: 'WETH' },
+        deploymentEids: [HUB_EID],
     },
 } as const
 
+// ============================================
+// Chapter 3: Strategy OVault Configuration
+// ============================================
+export const DEPLOYMENT_CONFIG_STRATEGY: DeploymentConfig = {
+    vault: {
+        deploymentEid: HUB_EID,
+        contracts: {
+            vault: 'MyERC4626Strategy',
+            shareAdapter: 'MyShareOFTAdapterStrategy',
+            composer: 'MyOVaultComposerStrategy',
+        },
+        vaultAddress: undefined,
+        assetOFTAddress: undefined,
+        shareOFTAdapterAddress: undefined,
+    },
+    shareOFT: {
+        contract: 'MyShareOFT',
+        metadata: { name: 'MyShareOFT', symbol: 'SHARE' },
+        deploymentEids: SPOKE_EIDS,
+    },
+    assetOFT: {
+        contract: 'MyHTSConnector',
+        metadata: { name: 'WETH', symbol: 'WETH' },
+        deploymentEids: [HUB_EID],
+    },
+} as const
+
+// ============================================
+// Helper Functions (shared across both configs)
+// ============================================
+
+// Chapter 2 helpers
 export const isVaultChain = (eid: number): boolean => eid === DEPLOYMENT_CONFIG.vault.deploymentEid
 export const shouldDeployVault = (eid: number): boolean => isVaultChain(eid) && !DEPLOYMENT_CONFIG.vault.vaultAddress
 export const shouldDeployAsset = (eid: number): boolean =>
     !DEPLOYMENT_CONFIG.vault.assetOFTAddress && DEPLOYMENT_CONFIG.assetOFT.deploymentEids.includes(eid)
 export const shouldDeployShare = (eid: number): boolean =>
     !DEPLOYMENT_CONFIG.vault.shareOFTAdapterAddress && DEPLOYMENT_CONFIG.shareOFT.deploymentEids.includes(eid)
-
 export const shouldDeployShareAdapter = (eid: number): boolean =>
     isVaultChain(eid) && !DEPLOYMENT_CONFIG.vault.shareOFTAdapterAddress
+
+// Chapter 3 helpers
+export const isVaultChainStrategy = (eid: number): boolean => eid === DEPLOYMENT_CONFIG_STRATEGY.vault.deploymentEid
+export const shouldDeployAssetStrategy = (eid: number): boolean =>
+    !DEPLOYMENT_CONFIG_STRATEGY.vault.assetOFTAddress &&
+    DEPLOYMENT_CONFIG_STRATEGY.assetOFT.deploymentEids.includes(eid)
+export const shouldDeployShareStrategy = (eid: number): boolean =>
+    !DEPLOYMENT_CONFIG_STRATEGY.vault.shareOFTAdapterAddress &&
+    DEPLOYMENT_CONFIG_STRATEGY.shareOFT.deploymentEids.includes(eid)

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.22;
 
+// ============================================
+// CHAPTER 1: Cross-Chain OFT
+// Wraps native ETH on Hedera as an HTS token
+// ============================================
+
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { HTSConnector } from "./hts/HTSConnector.sol";
 

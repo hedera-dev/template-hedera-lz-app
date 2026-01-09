@@ -6,7 +6,7 @@ import { type DeployFunction } from 'hardhat-deploy/types'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
 import { loadDeploymentAddress } from '../config/utils'
-import { DEPLOYMENT_CONFIG_STRATEGY } from '../devtools/deployConfigStrategy'
+import { DEPLOYMENT_CONFIG_STRATEGY } from '../devtools'
 
 const ADDRESSES_PATH = path.resolve(process.cwd(), 'env/addresses.testnet.json')
 const NETWORK_KEY = 'hedera-testnet'

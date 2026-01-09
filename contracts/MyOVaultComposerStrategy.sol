@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.22;
 
+// ============================================
+// CHAPTER 3: ETF Strategy Vault
+// Handles cross-chain deposit/redeem with auto-invest
+// ============================================
+
 import { IOFT } from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import { VaultComposerSync } from "@layerzerolabs/ovault-evm/contracts/VaultComposerSync.sol";
 

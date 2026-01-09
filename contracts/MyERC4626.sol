@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.22;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+// ============================================
+// CHAPTER 2: Cross-Chain Vault
+// ============================================
+
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC4626 } from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-
-import { OFTAdapter } from "@layerzerolabs/oft-evm/contracts/OFTAdapter.sol";
 
 /**
  * @title MyERC4626
@@ -33,44 +34,4 @@ contract MyERC4626 is ERC4626 {
      * @param _asset The underlying asset that the vault accepts
      */
     constructor(string memory _name, string memory _symbol, IERC20 _asset) ERC20(_name, _symbol) ERC4626(_asset) {}
-}
-
-/**
- * @title MyShareOFTAdapter
- * @notice OFT adapter for vault shares enabling cross-chain transfers
- * @dev The share token MUST be an OFT adapter (lockbox).
- * @dev A mint-burn adapter would not work since it transforms `ShareERC20::totalSupply()`
- */
-contract MyShareOFTAdapter is OFTAdapter {
-    /**
-     * @notice Creates a new OFT adapter for vault shares
-     * @dev Sets up cross-chain token transfer capabilities for vault shares
-     * @param _token The vault share token to adapt for cross-chain transfers
-     * @param _lzEndpoint The LayerZero endpoint for this chain
-     * @param _delegate The account with administrative privileges
-     */
-    constructor(
-        address _token,
-        address _lzEndpoint,
-        address _delegate
-    ) OFTAdapter(_token, _lzEndpoint, _delegate) Ownable(_delegate) {}
-}
-
-/**
- * @title MyShareOFTAdapterStrategy
- * @notice OFT adapter for strategy vault shares enabling cross-chain transfers
- * @dev Uses a distinct contract name so strategy deployments don't reuse Chapter 2 adapters.
- */
-contract MyShareOFTAdapterStrategy is OFTAdapter {
-    /**
-     * @notice Creates a new OFT adapter for strategy vault shares
-     * @param _token The vault share token to adapt for cross-chain transfers
-     * @param _lzEndpoint The LayerZero endpoint for this chain
-     * @param _delegate The account with administrative privileges
-     */
-    constructor(
-        address _token,
-        address _lzEndpoint,
-        address _delegate
-    ) OFTAdapter(_token, _lzEndpoint, _delegate) Ownable(_delegate) {}
 }

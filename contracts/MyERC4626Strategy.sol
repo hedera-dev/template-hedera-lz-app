@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.22;
 
+// ============================================
+// CHAPTER 3: ETF Strategy Vault
+// ERC4626 vault with auto-invest via HederaEtfStrategy
+// ============================================
+
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";

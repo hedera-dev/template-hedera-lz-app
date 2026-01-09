@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
+// ============================================
+// CHAPTER 2 & 3: Cross-Chain Vault Shares
+// Represents vault shares on spoke chains (Base)
+// ============================================
+
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { OFT } from "@layerzerolabs/oft-evm/contracts/OFT.sol";
 
