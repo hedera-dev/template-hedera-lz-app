@@ -9,8 +9,13 @@ import { loadDeploymentAddress } from '../../config/utils'
 const ROUTER_ABI = [
     'function addLiquidityETHNewPool(address token,uint256 amountTokenDesired,uint256 amountTokenMin,uint256 amountETHMin,address to,uint256 deadline) payable returns (uint256,uint256,uint256)',
     'function addLiquidityNewPool(address tokenA,address tokenB,uint256 amountADesired,uint256 amountBDesired,uint256 amountAMin,uint256 amountBMin,address to,uint256 deadline) payable returns (uint256,uint256,uint256)',
+    'function addLiquidityETH(address token,uint256 amountTokenDesired,uint256 amountTokenMin,uint256 amountETHMin,address to,uint256 deadline) payable returns (uint256,uint256,uint256)',
+    'function addLiquidity(address tokenA,address tokenB,uint256 amountADesired,uint256 amountBDesired,uint256 amountAMin,uint256 amountBMin,address to,uint256 deadline) returns (uint256,uint256,uint256)',
 ]
-const FACTORY_ABI = ['function pairCreateFee() view returns (uint256)']
+const FACTORY_ABI = [
+    'function pairCreateFee() view returns (uint256)',
+    'function getPair(address tokenA,address tokenB) view returns (address)',
+]
 const OFT_ABI = ['function token() view returns (address)']
 const ERC20_ABI = ['function approve(address,uint256) returns (bool)']
 
@@ -60,48 +65,96 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
         const hustlersLiquidity = BigNumber.from(args.hustlersLiquidity)
         const deadline = Math.floor(Date.now() / 1000) + 1200
 
-        await weth.approve(addresses.routerV1, wethLiquidity)
-        await hustlers.approve(addresses.routerV1, hustlersLiquidity)
+        const totalWethLiquidity = wethLiquidity.mul(2)
+        await (await weth.approve(addresses.routerV1, totalWethLiquidity)).wait()
+        await (await hustlers.approve(addresses.routerV1, hustlersLiquidity)).wait()
 
         const totalHbar = poolFeeWei.add(hbarLiquidityWei)
 
-        const addLiquidityETHNewPoolGas = await router.estimateGas.addLiquidityETHNewPool(
-            wethToken,
-            wethLiquidity,
-            0,
-            0,
-            deployer,
-            deadline,
-            {
+        const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+        const wethHbarPair = await factory.getPair(wethToken, addresses.whbarToken)
+        if (wethHbarPair === ZERO_ADDRESS) {
+            const addLiquidityETHNewPoolGas = await router.estimateGas.addLiquidityETHNewPool(
+                wethToken,
+                wethLiquidity,
+                0,
+                0,
+                deployer,
+                deadline,
+                {
+                    value: totalHbar,
+                }
+            )
+            const wethHbarTx = await router.addLiquidityETHNewPool(wethToken, wethLiquidity, 0, 0, deployer, deadline, {
                 value: totalHbar,
-            }
-        )
-        await router.addLiquidityETHNewPool(wethToken, wethLiquidity, 0, 0, deployer, deadline, {
-            value: totalHbar,
-            gasLimit: addLiquidityETHNewPoolGas.mul(12).div(10),
-        })
+                gasLimit: addLiquidityETHNewPoolGas.mul(12).div(10),
+            })
+            const wethHbarReceipt = await wethHbarTx.wait()
+            console.log(`Created WETH/HBAR pool tx: ${wethHbarReceipt.transactionHash}`)
+        } else {
+            const addLiquidityETHGas = await router.estimateGas.addLiquidityETH(wethToken, wethLiquidity, 0, 0, deployer, deadline, {
+                value: hbarLiquidityWei,
+            })
+            const wethHbarTx = await router.addLiquidityETH(wethToken, wethLiquidity, 0, 0, deployer, deadline, {
+                value: hbarLiquidityWei,
+                gasLimit: addLiquidityETHGas.mul(12).div(10),
+            })
+            const wethHbarReceipt = await wethHbarTx.wait()
+            console.log(`Added liquidity to existing WETH/HBAR pool (${wethHbarPair}) tx: ${wethHbarReceipt.transactionHash}`)
+        }
 
-        const addLiquidityNewPoolGas = await router.estimateGas.addLiquidityNewPool(
-            wethToken,
-            addresses.hustlersToken,
-            wethLiquidity,
-            hustlersLiquidity,
-            0,
-            0,
-            deployer,
-            deadline,
-            { value: poolFeeWei }
-        )
+        const wethHustlersPair = await factory.getPair(wethToken, addresses.hustlersToken)
+        if (wethHustlersPair === ZERO_ADDRESS) {
+            const addLiquidityNewPoolGas = await router.estimateGas.addLiquidityNewPool(
+                wethToken,
+                addresses.hustlersToken,
+                wethLiquidity,
+                hustlersLiquidity,
+                0,
+                0,
+                deployer,
+                deadline,
+                { value: poolFeeWei }
+            )
 
-        await router.addLiquidityNewPool(
-            wethToken,
-            addresses.hustlersToken,
-            wethLiquidity,
-            hustlersLiquidity,
-            0,
-            0,
-            deployer,
-            deadline,
-            { value: poolFeeWei, gasLimit: addLiquidityNewPoolGas.mul(12).div(10) }
-        )
+            const wethHustlersTx = await router.addLiquidityNewPool(
+                wethToken,
+                addresses.hustlersToken,
+                wethLiquidity,
+                hustlersLiquidity,
+                0,
+                0,
+                deployer,
+                deadline,
+                { value: poolFeeWei, gasLimit: addLiquidityNewPoolGas.mul(12).div(10) }
+            )
+            const wethHustlersReceipt = await wethHustlersTx.wait()
+            console.log(`Created WETH/HUSTLERS pool tx: ${wethHustlersReceipt.transactionHash}`)
+        } else {
+            const addLiquidityGas = await router.estimateGas.addLiquidity(
+                wethToken,
+                addresses.hustlersToken,
+                wethLiquidity,
+                hustlersLiquidity,
+                0,
+                0,
+                deployer,
+                deadline
+            )
+            const wethHustlersTx = await router.addLiquidity(
+                wethToken,
+                addresses.hustlersToken,
+                wethLiquidity,
+                hustlersLiquidity,
+                0,
+                0,
+                deployer,
+                deadline,
+                { gasLimit: addLiquidityGas.mul(12).div(10) }
+            )
+            const wethHustlersReceipt = await wethHustlersTx.wait()
+            console.log(
+                `Added liquidity to existing WETH/HUSTLERS pool (${wethHustlersPair}) tx: ${wethHustlersReceipt.transactionHash}`
+            )
+        }
     })
