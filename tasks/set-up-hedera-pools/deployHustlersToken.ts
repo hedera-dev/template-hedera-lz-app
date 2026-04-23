@@ -7,6 +7,7 @@ import { AccountId, Client, PrivateKey, TokenCreateTransaction } from '@hiero-le
 
 const CONFIG_PATH = path.resolve(process.cwd(), 'env/addresses.testnet.json')
 const NETWORK_KEY = 'hedera-testnet'
+const to0xAddress = (address: string): string => (address.startsWith('0x') ? address : `0x${address}`)
 
 const loadConfig = (): Record<string, any> => {
     if (!fs.existsSync(CONFIG_PATH)) {
@@ -58,10 +59,11 @@ task('lz:setup:deploy-hustlers', 'Create the HUSTLERS HTS token via the Hiero JS
 
         const config = loadConfig()
         config[NETWORK_KEY] = config[NETWORK_KEY] || {}
-        config[NETWORK_KEY].hustlersToken = tokenId.toSolidityAddress()
+        const hustlersAddress = to0xAddress(tokenId.toSolidityAddress())
+        config[NETWORK_KEY].hustlersToken = hustlersAddress
         saveConfig(config)
 
         console.log(`HUSTLERS token ID: ${tokenId.toString()}`)
-        console.log(`HUSTLERS EVM address: ${tokenId.toSolidityAddress()}`)
+        console.log(`HUSTLERS EVM address: ${hustlersAddress}`)
         console.log(`Updated ${CONFIG_PATH}`)
     })
