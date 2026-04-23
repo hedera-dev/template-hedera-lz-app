@@ -90,7 +90,10 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 gasLimit: addLiquidityETHNewPoolGas.mul(12).div(10),
             })
             const wethHbarReceipt = await wethHbarTx.wait()
-            console.log(`Created WETH/HBAR pool tx: ${wethHbarReceipt.transactionHash}`)
+            const wethHbarPairAfter = await factory.getPair(wethToken, addresses.whbarToken)
+            console.log(
+                `WETH/HBAR: added liquidity (new pool) pair=${wethHbarPairAfter} tx=${wethHbarReceipt.transactionHash}`
+            )
         } else {
             const addLiquidityETHGas = await router.estimateGas.addLiquidityETH(wethToken, wethLiquidity, 0, 0, deployer, deadline, {
                 value: hbarLiquidityWei,
@@ -100,7 +103,9 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 gasLimit: addLiquidityETHGas.mul(12).div(10),
             })
             const wethHbarReceipt = await wethHbarTx.wait()
-            console.log(`Added liquidity to existing WETH/HBAR pool (${wethHbarPair}) tx: ${wethHbarReceipt.transactionHash}`)
+            console.log(
+                `WETH/HBAR: added liquidity (existing pool) pair=${wethHbarPair} tx=${wethHbarReceipt.transactionHash}`
+            )
         }
 
         const wethHustlersPair = await factory.getPair(wethToken, addresses.hustlersToken)
@@ -129,7 +134,10 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 { value: poolFeeWei, gasLimit: addLiquidityNewPoolGas.mul(12).div(10) }
             )
             const wethHustlersReceipt = await wethHustlersTx.wait()
-            console.log(`Created WETH/HUSTLERS pool tx: ${wethHustlersReceipt.transactionHash}`)
+            const wethHustlersPairAfter = await factory.getPair(wethToken, addresses.hustlersToken)
+            console.log(
+                `WETH/HUSTLERS: added liquidity (new pool) pair=${wethHustlersPairAfter} tx=${wethHustlersReceipt.transactionHash}`
+            )
         } else {
             const addLiquidityGas = await router.estimateGas.addLiquidity(
                 wethToken,
@@ -154,7 +162,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
             )
             const wethHustlersReceipt = await wethHustlersTx.wait()
             console.log(
-                `Added liquidity to existing WETH/HUSTLERS pool (${wethHustlersPair}) tx: ${wethHustlersReceipt.transactionHash}`
+                `WETH/HUSTLERS: added liquidity (existing pool) pair=${wethHustlersPair} tx=${wethHustlersReceipt.transactionHash}`
             )
         }
     })
