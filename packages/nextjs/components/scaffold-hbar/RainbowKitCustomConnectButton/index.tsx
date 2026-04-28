@@ -25,7 +25,7 @@ export const RainbowKitCustomConnectButton = () => {
 
   const getBlockExplorerAddressLink = (address: string) => {
     const baseUrl = targetNetwork.blockExplorers?.default?.url ?? "https://hashscan.io/testnet";
-    const pathSegment = targetNetwork.id === 295 || targetNetwork.id === 296 ? "account" : "address";
+    const pathSegment = targetNetwork.id === 296 ? "account" : "address";
     return `${baseUrl}/${pathSegment}/${address}`;
   };
 
