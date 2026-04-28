@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { formatEther, parseEther } from "viem";
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useAccount, useSwitchChain, useWaitForTransactionReceipt } from "wagmi";
+import { deployedContracts } from "~~/contracts/deployedContracts";
 import { useLayerZeroScanLink, useOvaultQuote, useOvaultSend } from "~~/hooks/lz-app";
 
 export default function VaultPage() {
@@ -14,11 +16,14 @@ export default function VaultPage() {
   const { chainId } = useAccount();
   const { switchChainAsync } = useSwitchChain();
   const isBase = chainId === 84532;
-  const quote = useOvaultQuote({ amount });
+  const quote = useOvaultQuote({ amount, side: mode, crossChain });
   const tx = useOvaultSend(mode);
   const lzLink = useLayerZeroScanLink(submittedTxHash, 84532);
   const baseScanLink = submittedTxHash ? `https://sepolia.basescan.org/tx/${submittedTxHash}` : "";
-  const hashscanLink = "https://hashscan.io/testnet";
+  const destinationContractAddress = deployedContracts[296]?.MyOVaultComposerStrategy?.address;
+  const hashscanLink = destinationContractAddress
+    ? `https://hashscan.io/testnet/account/${destinationContractAddress}`
+    : "https://hashscan.io/testnet";
   const receipt = useWaitForTransactionReceipt({
     chainId: 84532,
     hash: submittedTxHash,
@@ -28,6 +33,21 @@ export default function VaultPage() {
     () => `mode=${mode};crossChain=${crossChain};amount=${amount};composer=MyOVaultComposerStrategy`,
     [mode, crossChain, amount],
   );
+  const amountWei = (() => {
+    try {
+      return parseEther(amount || "0");
+    } catch {
+      return 0n;
+    }
+  })();
+  const quoteFeeWei = (() => {
+    try {
+      return BigInt(quote.nativeFee || "0");
+    } catch {
+      return 0n;
+    }
+  })();
+  const estimatedMsgValue = mode === "deposit" ? quoteFeeWei + amountWei : quoteFeeWei;
 
   const onSubmit = async () => {
     setSubmitError("");
@@ -61,6 +81,11 @@ export default function VaultPage() {
         </label>
         <input className="input input-bordered" value={amount} onChange={(e) => setAmount(e.target.value)} />
         <p className="text-sm text-base-content/70">Quote native fee: {quote.nativeFee}</p>
+        <p className="text-sm text-base-content/70">Estimated msg.value: {formatEther(estimatedMsgValue)} ETH</p>
+        <p className="text-xs text-base-content/60">
+          Quote status: {quote.isFetching ? "refreshing" : quote.isLoading ? "loading" : quote.ok ? "ready" : "error"}
+          {quote.updatedAt ? ` - updated ${new Date(quote.updatedAt).toLocaleTimeString()}` : ""}
+        </p>
         <p className="text-xs font-mono bg-base-300 p-2 rounded">composeMsg preview: {composePreview}</p>
         {!isBase ? <div className="alert alert-warning">Switch to Base Sepolia to {mode}.</div> : null}
         <button className="btn btn-primary" onClick={onSubmit} disabled={tx.isPending || receipt.isLoading}>
@@ -99,7 +124,7 @@ export default function VaultPage() {
                 </a>
               ) : null}
               <a className="link inline-flex items-center gap-1" href={hashscanLink} target="_blank" rel="noreferrer">
-                HashScan (destination) <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                HashScan (destination contract) <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
               </a>
             </div>
           </div>

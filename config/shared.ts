@@ -105,21 +105,6 @@ export function createMeshConfig(mesh: MeshConfig) {
                 extendedMetadata[chainKey] = defaultMetadata[chainKey] || {}
             }
 
-            const customExecutor = customExecutorsByEid[eid]
-            if (customExecutor) {
-                extendedMetadata[chainKey] = {
-                    ...extendedMetadata[chainKey],
-                    executors: {
-                        ...extendedMetadata[chainKey]?.executors,
-                        [customExecutor.address]: {
-                            version: 2,
-                            canonicalName: 'SimpleExecutorMock',
-                            id: `my-custom-executor-${chainKey}`,
-                        },
-                    },
-                }
-            }
-
             const customDVN = customDVNsByEid[eid]
             if (customDVN) {
                 extendedMetadata[chainKey] = {
@@ -134,6 +119,26 @@ export function createMeshConfig(mesh: MeshConfig) {
                     },
                 }
             }
+
+            // Configure the chain's deployment to use our custom executor address.
+            // This follows the metadata-tools expected schema.
+            const customExecutor = customExecutorsByEid[eid]
+            if (customExecutor) {
+                const chainMetadata = extendedMetadata[chainKey] || {}
+                extendedMetadata[chainKey] = {
+                    ...chainMetadata,
+                    deployments: [
+                        ...(chainMetadata.deployments || []),
+                        {
+                            eid: String(eid),
+                            chainKey,
+                            stage: 'testnet',
+                            version: 2,
+                            executor: { address: customExecutor.address },
+                        },
+                    ],
+                }
+            }
         })
 
         return extendedMetadata
@@ -143,10 +148,9 @@ export function createMeshConfig(mesh: MeshConfig) {
         [
             hederaContract,
             baseContract,
-            [['SimpleDVNMock'], []], // DVN configuration
+            [['SimpleDVNMock'], [[], 0]], // [requiredDVNs, [optionalDVNs, optionalThreshold]]
             [1, 1], // Confirmations
             [EVM_ENFORCED_OPTIONS, EVM_ENFORCED_OPTIONS],
-            'SimpleExecutorMock',
         ],
     ]
 
