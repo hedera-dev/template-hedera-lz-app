@@ -3,6 +3,7 @@
   "version": "0.7.10",
   "private": true,
   "license": "MIT",
+  "packageManager": "pnpm@10.17.0",
   "scripts": {
     "clean": "rm -rf artifacts cache out",
     "compile": "concurrently -c auto --names forge,hardhat '$npm_execpath run compile:forge' '$npm_execpath run compile:hardhat'",
@@ -17,7 +18,10 @@
     "lint:sol": "solhint 'contracts/**/*.sol'",
     "test": "$npm_execpath run test:forge && $npm_execpath run test:hardhat",
     "test:forge": "forge test",
-    "test:hardhat": "hardhat test"
+    "test:hardhat": "hardhat test",
+    "next:dev": "pnpm --filter nextjs dev",
+    "next:build": "pnpm --filter nextjs build",
+    "next:gen-contracts": "pnpm --filter nextjs gen:contracts"
   },
   "resolutions": {
     "ethers": "^5.7.2",

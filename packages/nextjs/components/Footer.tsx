@@ -1,0 +1,27 @@
+import { SwitchTheme } from "./SwitchTheme";
+
+export const Footer = () => {
+  return (
+    <footer className="min-h-0 py-5 px-1 mb-11 lg:mb-0">
+      <div className="fixed flex justify-between items-center w-full z-10 p-4 bottom-0 left-0 pointer-events-none">
+        <div className="flex flex-col md:flex-row gap-2 pointer-events-auto">
+          <div className="btn btn-primary btn-sm font-normal gap-1 cursor-auto rounded-full">Hedera Testnet + Base Sepolia</div>
+        </div>
+        <div className="pointer-events-auto">
+          <SwitchTheme />
+        </div>
+      </div>
+      <div className="w-full">
+        <ul className="menu menu-horizontal w-full">
+          <div className="flex justify-center items-center gap-3 text-sm w-full text-base-content/60">
+            <a href="https://github.com/buidler-labs/scaffold-hbar" target="_blank" rel="noreferrer" className="link hover:text-primary">
+              GitHub
+            </a>
+            <span className="opacity-30">|</span>
+            <span>Template Hedera LZ App</span>
+          </div>
+        </ul>
+      </div>
+    </footer>
+  );
+};
