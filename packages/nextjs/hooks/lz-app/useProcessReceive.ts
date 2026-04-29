@@ -1,0 +1,535 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { PublicClient, parseAbiItem, formatUnits } from "viem";
+import { useAccount, usePublicClient } from "wagmi";
+import { useDeployedContractInfo, useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
+import { buildComposePayload, buildOftMessage, computeAmountReceivedLD, decodeOftMessage, generateGuid, addressToBytes32 } from "./utils/messageEncoding";
+
+const BASE_EID = 40245;
+const HEDERA_EID = 40285;
+const BASE_CHAIN_ID = 84532;
+const HEDERA_CHAIN_ID = 296;
+
+/**
+ * Hedera RPC sometimes returns data that viem can't decode.
+ * This helper uses raw eth_call and manual decoding as fallback.
+ */
+async function safeReadContract(
+  client: PublicClient,
+  params: { address: `0x${string}`; abi: readonly any[]; functionName: string; args?: readonly any[] }
+): Promise<any> {
+  try {
+    return await client.readContract(params as any);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("Position") && errMsg.includes("out of bounds")) {
+      // Fallback to raw RPC call
+      const { encodeFunctionData } = await import("viem");
+      const data = encodeFunctionData({
+        abi: params.abi as any,
+        functionName: params.functionName,
+        args: params.args ?? [],
+      });
+      
+      const result = await client.request({
+        method: "eth_call",
+        params: [{ to: params.address, data }, "latest"],
+      });
+      
+      const raw = (result as `0x${string}`) ?? "0x";
+      if (raw === "0x") throw err;
+
+      const normalizeAddress = (hex: `0x${string}`): `0x${string}` => {
+        const body = hex.slice(2).padStart(64, "0");
+        return (`0x${body.slice(-40)}` as `0x${string}`);
+      };
+
+      // Hedera RPC occasionally returns malformed payload lengths that viem rejects.
+      // Manually parse common scalar return types used in this hook.
+      if (params.functionName === "token" || params.functionName === "endpoint") {
+        return normalizeAddress(raw);
+      }
+      if (
+        params.functionName === "sharedDecimals" ||
+        params.functionName === "decimals" ||
+        params.functionName === "inboundNonce" ||
+        params.functionName === "outboundNonce"
+      ) {
+        return BigInt(raw);
+      }
+
+      throw err;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Hedera's JSON-RPC can return event logs in a format that viem can't decode properly.
+ * This helper polls for the receipt and only checks the status, ignoring log decoding errors.
+ */
+async function waitForHederaReceipt(client: PublicClient, hash: `0x${string}`, maxAttempts = 30, intervalMs = 2000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const receipt = await client.getTransactionReceipt({ hash });
+      if (receipt) {
+        if (receipt.status === "reverted") {
+          throw new Error(`Transaction reverted: ${hash}`);
+        }
+        return receipt;
+      }
+    } catch (err) {
+      // If it's a "transaction not found" error, keep polling
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("could not be found") || msg.includes("not found")) {
+        await new Promise(r => setTimeout(r, intervalMs));
+        continue;
+      }
+      // If it's a decoding error (Position out of bounds), the tx likely succeeded
+      // Poll the raw RPC to check status without full decoding
+      if (msg.includes("Position") && msg.includes("out of bounds")) {
+        // Use a raw RPC call to get just the status
+        const rawReceipt = await client.request({
+          method: "eth_getTransactionReceipt",
+          params: [hash],
+        }) as { status: string } | null;
+        if (rawReceipt && rawReceipt.status === "0x1") {
+          return { status: "success" as const, transactionHash: hash };
+        }
+        if (rawReceipt && rawReceipt.status === "0x0") {
+          throw new Error(`Transaction reverted: ${hash}`);
+        }
+      }
+      throw err;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Timeout waiting for transaction receipt: ${hash}`);
+}
+
+const OFT_INFO_ABI = [
+  { inputs: [], name: "sharedDecimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "token", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "endpoint", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+] as const;
+const ERC20_DECIMALS_ABI = [
+  { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
+] as const;
+const ENDPOINT_ABI = [
+  {
+    inputs: [
+      { name: "_receiver", type: "address" },
+      { name: "_srcEid", type: "uint32" },
+      { name: "_sender", type: "bytes32" },
+    ],
+    name: "inboundNonce",
+    outputs: [{ type: "uint64" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "_sender", type: "address" },
+      { name: "_dstEid", type: "uint32" },
+      { name: "_receiver", type: "bytes32" },
+    ],
+    name: "outboundNonce",
+    outputs: [{ type: "uint64" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+const PACKET_SENT_EVENT = parseAbiItem(
+  "event PacketSent(bytes encodedPayload, bytes options, address sendLibrary)"
+);
+
+const OFT_SENT_EVENT = parseAbiItem(
+  "event OFTSent(bytes32 indexed guid, uint32 dstEid, address indexed fromAddress, uint256 amountSentLD, uint256 amountReceivedLD)"
+);
+
+type PendingMessage = {
+  nonce: bigint;
+  guid: `0x${string}`;
+  recipient: `0x${string}`;
+  amountSD: bigint;
+  amountLD: string;
+  sender: `0x${string}`;
+  blockNumber: bigint;
+};
+
+export type ProcessReceiveParams = {
+  sourceChainId: 84532 | 296;
+  destinationChainId: 84532 | 296;
+  srcEid: number;
+  dstEid: number;
+  nonce: bigint;
+  amount: string;
+  recipient: `0x${string}`;
+  srcOftAddress: `0x${string}`;
+  dstOftAddress: `0x${string}`;
+  composeMsg?: `0x${string}`;
+  composeFrom?: `0x${string}`;
+  composeTo?: `0x${string}`;
+  composeGas?: bigint;
+  composeValue?: bigint;
+};
+
+export const useProcessReceive = (chainId: 296 | 84532 = 296) => {
+  const { address } = useAccount();
+  const destinationClient = usePublicClient({ chainId });
+  const dvn = useScaffoldWriteContract("SimpleDVNMock", chainId);
+  const executor = useScaffoldWriteContract("SimpleExecutorMock", chainId);
+  const receiveUln = useDeployedContractInfo("ReceiveUln302", chainId);
+  const ownerRead = useScaffoldReadContract({
+    contractName: "SimpleDVNMock",
+    chainId,
+    functionName: "owner",
+  });
+
+  const owner = ownerRead.data as `0x${string}` | undefined;
+  const isOwner = Boolean(owner && address && owner.toLowerCase() === address.toLowerCase());
+
+  const status = useMemo(() => {
+    if (dvn.isPending || executor.isPending) return "pending";
+    if (dvn.error || executor.error) return "error";
+    return "idle";
+  }, [dvn.isPending, executor.isPending, dvn.error, executor.error]);
+
+  const process = async (params: ProcessReceiveParams) => {
+    if (!destinationClient) throw new Error("Destination client unavailable");
+    if (!receiveUln?.address) throw new Error("Missing ReceiveUln302 deployment");
+    if (!isOwner) throw new Error("Connected wallet is not owner of SimpleDVNMock");
+
+    const sharedDecimalsRaw = await safeReadContract(destinationClient, {
+      address: params.dstOftAddress,
+      abi: OFT_INFO_ABI,
+      functionName: "sharedDecimals",
+    });
+    const sharedDecimals = Number(sharedDecimalsRaw);
+
+    const tokenAddress = (await safeReadContract(destinationClient, {
+      address: params.dstOftAddress,
+      abi: OFT_INFO_ABI,
+      functionName: "token",
+    })) as `0x${string}`;
+
+    let localDecimals = sharedDecimals;
+    if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
+      localDecimals = 18;
+    } else {
+      const localDecimalsRaw = await safeReadContract(destinationClient, {
+        address: tokenAddress,
+        abi: ERC20_DECIMALS_ABI,
+        functionName: "decimals",
+      });
+      localDecimals = Number(localDecimalsRaw);
+    }
+
+    const srcOappB32 = addressToBytes32(params.srcOftAddress);
+    const dstOappB32 = addressToBytes32(params.dstOftAddress);
+
+    // Validate nonce before executing to prevent reverts
+    const endpointAddress = (await safeReadContract(destinationClient, {
+      address: params.dstOftAddress,
+      abi: OFT_INFO_ABI,
+      functionName: "endpoint",
+    })) as `0x${string}`;
+
+    const currentInboundNonce = await safeReadContract(destinationClient, {
+      address: endpointAddress,
+      abi: ENDPOINT_ABI,
+      functionName: "inboundNonce",
+      args: [params.dstOftAddress, params.srcEid, srcOappB32],
+    });
+
+    const nextNonceToExecute = BigInt(currentInboundNonce) + 1n;
+    if (params.nonce < nextNonceToExecute) {
+      throw new Error(
+        `Nonce ${params.nonce} has already been executed. The next nonce to process is ${nextNonceToExecute}.`,
+      );
+    }
+    if (params.nonce > nextNonceToExecute) {
+      throw new Error(
+        `Nonce ${params.nonce} is ahead of sequence. You must process nonce ${nextNonceToExecute} first. ` +
+          `Messages must be processed in order.`,
+      );
+    }
+
+    const message = buildOftMessage({
+      to: params.recipient,
+      amount: params.amount,
+      sharedDecimals,
+      composeMsg: params.composeMsg,
+      composeFrom: params.composeFrom,
+    });
+    const guid = generateGuid({
+      nonce: params.nonce,
+      srcEid: params.srcEid,
+      srcOappB32,
+      dstEid: params.dstEid,
+      dstOappB32,
+    });
+
+    // Use explicit gas limit for Hedera to avoid gas estimation failures
+    const HEDERA_GAS_LIMIT = 1_500_000n;
+
+    const verifyHash = await dvn.writeContractAsync(
+      "verify",
+      [message, params.nonce, params.srcEid, srcOappB32, params.dstEid, params.dstOftAddress],
+      { gas: HEDERA_GAS_LIMIT },
+    );
+    await waitForHederaReceipt(destinationClient, verifyHash as `0x${string}`);
+
+    const lzReceiveParam = {
+      origin: {
+        srcEid: params.srcEid,
+        sender: srcOappB32,
+        nonce: params.nonce,
+      },
+      receiver: params.dstOftAddress,
+      guid,
+      message,
+      extraData: "0x",
+      gas: 1_000_000n,
+      value: 0n,
+    };
+
+    const commitExecuteHash = await executor.writeContractAsync(
+      "commitAndExecute",
+      [receiveUln.address, lzReceiveParam, []],
+      { gas: HEDERA_GAS_LIMIT },
+    );
+    await waitForHederaReceipt(destinationClient, commitExecuteHash as `0x${string}`);
+
+    let composeHash: `0x${string}` | undefined;
+    if (params.composeMsg && params.composeFrom && params.composeTo) {
+      const amountReceivedLD = computeAmountReceivedLD({
+        amount: params.amount,
+        sharedDecimals,
+        localDecimals,
+      });
+      const composePayload = buildComposePayload({
+        nonce: params.nonce,
+        srcEid: params.srcEid,
+        amountReceivedLD,
+        composeFrom: params.composeFrom,
+        composeMsg: params.composeMsg,
+      });
+      composeHash = (await executor.writeContractAsync(
+        "compose302",
+        [
+          params.dstOftAddress,
+          params.composeTo,
+          guid,
+          0,
+          composePayload,
+          "0x",
+          params.composeGas ?? 200_000n,
+        ],
+        { value: params.composeValue ?? 0n, gas: HEDERA_GAS_LIMIT },
+      )) as `0x${string}`;
+      await waitForHederaReceipt(destinationClient, composeHash);
+    }
+
+    return {
+      verifyHash,
+      commitExecuteHash,
+      composeHash,
+      guid,
+      debug: {
+        srcEid: params.srcEid,
+        dstEid: params.dstEid,
+        nonce: params.nonce.toString(),
+        srcOftAddress: params.srcOftAddress,
+        dstOftAddress: params.dstOftAddress,
+        receiver: lzReceiveParam.receiver,
+        message,
+        decodedMessage: decodeOftMessage(message as `0x${string}`),
+      },
+    };
+  };
+
+  const getNextNonce = async (srcOftAddress: `0x${string}`, dstOftAddress: `0x${string}`, srcEid: number) => {
+    if (!destinationClient) throw new Error("Destination client unavailable");
+
+    const srcOappB32 = addressToBytes32(srcOftAddress);
+    const endpointAddress = (await safeReadContract(destinationClient, {
+      address: dstOftAddress,
+      abi: OFT_INFO_ABI,
+      functionName: "endpoint",
+    })) as `0x${string}`;
+
+    const currentInboundNonce = await safeReadContract(destinationClient, {
+      address: endpointAddress,
+      abi: ENDPOINT_ABI,
+      functionName: "inboundNonce",
+      args: [dstOftAddress, srcEid, srcOappB32],
+    });
+
+    return BigInt(currentInboundNonce) + 1n;
+  };
+
+  return {
+    process,
+    getNextNonce,
+    status,
+    isOwner,
+    owner,
+    sourceEid: chainId === 296 ? BASE_EID : HEDERA_EID,
+    destinationEid: chainId === 296 ? HEDERA_EID : BASE_EID,
+    isPending: dvn.isPending || executor.isPending,
+    error: dvn.error || executor.error,
+  };
+};
+
+/**
+ * Hook to fetch all pending messages from source chain and process them in order
+ */
+export const usePendingMessages = () => {
+  const baseClient = usePublicClient({ chainId: BASE_CHAIN_ID });
+  const hederaClient = usePublicClient({ chainId: HEDERA_CHAIN_ID });
+  const baseOft = useDeployedContractInfo("MyNativeOFTAdapter", BASE_CHAIN_ID);
+  const hederaOft = useDeployedContractInfo("MyHTSConnector", HEDERA_CHAIN_ID);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchPendingMessages = async (): Promise<{
+    pendingMessages: PendingMessage[];
+    nextNonce: bigint;
+    latestOutboundNonce: bigint;
+    pendingCount: number;
+  }> => {
+    if (!baseClient || !hederaClient) throw new Error("Clients unavailable");
+    if (!baseOft?.address || !hederaOft?.address) throw new Error("OFT deployments not found");
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const srcOappB32 = addressToBytes32(baseOft.address);
+      const dstOappB32 = addressToBytes32(hederaOft.address);
+
+      // Use safe wrapper for Hedera calls to handle decoding issues
+      const endpointAddress = (await safeReadContract(hederaClient, {
+        address: hederaOft.address,
+        abi: OFT_INFO_ABI,
+        functionName: "endpoint",
+      })) as `0x${string}`;
+
+      const currentInboundNonce = await safeReadContract(hederaClient, {
+        address: endpointAddress,
+        abi: ENDPOINT_ABI,
+        functionName: "inboundNonce",
+        args: [hederaOft.address, BASE_EID, srcOappB32],
+      });
+      const nextNonce = BigInt(currentInboundNonce) + 1n;
+
+      const baseEndpoint = (await baseClient.readContract({
+        address: baseOft.address,
+        abi: OFT_INFO_ABI,
+        functionName: "endpoint",
+      })) as `0x${string}`;
+
+      const latestOutboundNonce = await baseClient.readContract({
+        address: baseEndpoint,
+        abi: ENDPOINT_ABI,
+        functionName: "outboundNonce",
+        args: [baseOft.address, HEDERA_EID, dstOappB32],
+      });
+
+      const pendingCount = Number(BigInt(latestOutboundNonce) - BigInt(currentInboundNonce));
+
+      if (pendingCount <= 0) {
+        return { pendingMessages: [], nextNonce, latestOutboundNonce: BigInt(latestOutboundNonce), pendingCount: 0 };
+      }
+
+      const sharedDecimalsRaw = await safeReadContract(hederaClient, {
+        address: hederaOft.address,
+        abi: OFT_INFO_ABI,
+        functionName: "sharedDecimals",
+      });
+      const sharedDecimals = Number(sharedDecimalsRaw);
+
+      const currentBlock = await baseClient.getBlockNumber();
+      
+      // Base Sepolia RPC limits eth_getLogs to 10,000 blocks per request
+      // Paginate through blocks to find all OFTSent events
+      const MAX_BLOCK_RANGE = 9900n;
+      const TOTAL_BLOCKS_TO_SEARCH = 50000n;
+      const startBlock = currentBlock > TOTAL_BLOCKS_TO_SEARCH ? currentBlock - TOTAL_BLOCKS_TO_SEARCH : 0n;
+      
+      const oftSentLogs: Awaited<ReturnType<typeof baseClient.getLogs<typeof OFT_SENT_EVENT>>>  = [];
+      
+      for (let fromBlock = startBlock; fromBlock < currentBlock; fromBlock += MAX_BLOCK_RANGE) {
+        const toBlock = fromBlock + MAX_BLOCK_RANGE > currentBlock ? currentBlock : fromBlock + MAX_BLOCK_RANGE;
+        const logs = await baseClient.getLogs({
+          address: baseOft.address,
+          event: OFT_SENT_EVENT,
+          fromBlock,
+          toBlock,
+        });
+        oftSentLogs.push(...logs);
+      }
+
+      const pendingMessages: PendingMessage[] = [];
+
+      for (const log of oftSentLogs) {
+        const amountReceivedLD = log.args.amountReceivedLD;
+        const sender = log.args.fromAddress;
+        const guid = log.args.guid;
+
+        if (!amountReceivedLD || !sender || !guid) continue;
+
+        const amountSD = amountReceivedLD / (10n ** BigInt(18 - sharedDecimals));
+
+        for (let n = nextNonce; n <= BigInt(latestOutboundNonce); n++) {
+          const expectedGuid = generateGuid({
+            nonce: n,
+            srcEid: BASE_EID,
+            srcOappB32,
+            dstEid: HEDERA_EID,
+            dstOappB32,
+          });
+
+          if (expectedGuid.toLowerCase() === guid.toLowerCase()) {
+            pendingMessages.push({
+              nonce: n,
+              guid: guid as `0x${string}`,
+              recipient: sender as `0x${string}`,
+              amountSD,
+              amountLD: formatUnits(amountReceivedLD, 18),
+              sender: sender as `0x${string}`,
+              blockNumber: log.blockNumber,
+            });
+            break;
+          }
+        }
+      }
+
+      pendingMessages.sort((a, b) => (a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : 0));
+
+      return {
+        pendingMessages,
+        nextNonce,
+        latestOutboundNonce: BigInt(latestOutboundNonce),
+        pendingCount,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to fetch pending messages";
+      setError(msg);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return {
+    fetchPendingMessages,
+    isLoading,
+    error,
+    srcOftAddress: baseOft?.address as `0x${string}` | undefined,
+    dstOftAddress: hederaOft?.address as `0x${string}` | undefined,
+  };
+};

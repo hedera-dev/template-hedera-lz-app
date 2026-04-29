@@ -123,5 +123,5 @@ export const buildOvaultSendParam = async ({
     oftCmd: "0x" as `0x${string}`,
   };
 
-  return { amountWei, sendParam };
+  return { amountWei, sendParam, composeValue, composeGas };
 };

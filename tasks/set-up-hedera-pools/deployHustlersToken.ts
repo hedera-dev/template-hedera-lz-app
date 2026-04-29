@@ -3,8 +3,6 @@ import path from 'path'
 
 import { task, types } from 'hardhat/config'
 
-import { AccountId, Client, PrivateKey, TokenCreateTransaction } from '@hiero-ledger/sdk'
-
 const CONFIG_PATH = path.resolve(process.cwd(), 'env/addresses.testnet.json')
 const NETWORK_KEY = 'hedera-testnet'
 const to0xAddress = (address: string): string => (address.startsWith('0x') ? address : `0x${address}`)
@@ -26,6 +24,9 @@ task('lz:setup:deploy-hustlers', 'Create the HUSTLERS HTS token via the Hiero JS
     .addOptionalParam('decimals', 'Token decimals', 6, types.int)
     .addOptionalParam('supply', 'Initial supply (whole units)', '100000000', types.string)
     .setAction(async (args) => {
+        // Dynamic import to avoid ethers version conflict at hardhat startup
+        const { AccountId, Client, PrivateKey, TokenCreateTransaction } = await import('@hiero-ledger/sdk')
+
         const privateKeyString = process.env.PRIVATE_KEY
 
         if (!privateKeyString) {

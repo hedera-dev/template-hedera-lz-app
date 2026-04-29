@@ -14,7 +14,7 @@
   "dependencies": {
     "@heroicons/react": "^2.1.5",
     "@hiero-ledger/sdk": "^2.80.0",
-    "@rainbow-me/rainbowkit": "2.2.9",
+    "@rainbow-me/rainbowkit": "2.1.7",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@scaffold-hbar-ui/components": "file:../../../scaffold-ui/packages/components",
     "@scaffold-hbar-ui/debug-contracts": "file:../../../scaffold-ui/packages/debug-contracts",
@@ -30,8 +30,8 @@
     "react-dom": "^19.2.3",
     "react-hot-toast": "^2.4.0",
     "usehooks-ts": "^3.1.0",
-    "viem": "2.39.0",
-    "wagmi": "2.19.5",
+    "viem": "2.21.0",
+    "wagmi": "2.12.17",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

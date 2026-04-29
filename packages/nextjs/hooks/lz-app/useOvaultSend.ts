@@ -5,6 +5,29 @@ import { buildOvaultSendParam, normalizeQuote, Side } from "./ovaultSendParam";
 import { useDeployedContractInfo, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
 
 const BASE_CHAIN_ID = 84532;
+const HEDERA_EID = 40285;
+const ENDPOINT_ABI = [
+  {
+    inputs: [
+      { internalType: "address", name: "_sender", type: "address" },
+      { internalType: "uint32", name: "_dstEid", type: "uint32" },
+      { internalType: "bytes32", name: "_receiver", type: "bytes32" },
+    ],
+    name: "outboundNonce",
+    outputs: [{ internalType: "uint64", name: "", type: "uint64" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+const OAPP_PEER_ABI = [
+  {
+    inputs: [{ internalType: "uint32", name: "_eid", type: "uint32" }],
+    name: "peers",
+    outputs: [{ internalType: "bytes32", name: "peer", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
 
 export const useOvaultSend = (side: Side) => {
   const { address } = useAccount();
@@ -23,7 +46,7 @@ export const useOvaultSend = (side: Side) => {
     if (!vaultDeployment || !composerDeployment) throw new Error("Missing hub composer/vault deployment");
     if (!baseClient || !hederaClient) throw new Error("Missing public client for Base/Hedera");
 
-    const { amountWei, sendParam } = await buildOvaultSendParam({
+    const { amountWei, sendParam, composeValue, composeGas } = await buildOvaultSendParam({
       side,
       amount,
       crossChain,
@@ -45,7 +68,41 @@ export const useOvaultSend = (side: Side) => {
     const quote = normalizeQuote(quoteRaw);
 
     const msgValue = side === "deposit" ? quote.nativeFee + amountWei : quote.nativeFee;
-    return write.writeContractAsync("send", [sendParam, quote, address], msgValue);
+    const endpointAddress = (await baseClient.readContract({
+      address: write.deployment.address,
+      abi: write.deployment.abi,
+      functionName: "endpoint",
+    })) as `0x${string}`;
+    const peer = (await baseClient.readContract({
+      address: write.deployment.address,
+      abi: OAPP_PEER_ABI,
+      functionName: "peers",
+      args: [HEDERA_EID],
+    })) as `0x${string}`;
+    const nonceRaw = await baseClient.readContract({
+      address: endpointAddress,
+      abi: ENDPOINT_ABI,
+      functionName: "outboundNonce",
+      args: [write.deployment.address, HEDERA_EID, peer],
+    });
+    const outboundNonce = BigInt(nonceRaw) + 1n;
+
+    const txHash = (await write.writeContractAsync("send", [sendParam, quote, address], msgValue)) as `0x${string}`;
+    const destinationOftAddress =
+      side === "deposit" ? (assetOftHub?.address as `0x${string}` | undefined) : (shareOftHub?.address as `0x${string}` | undefined);
+
+    return {
+      txHash,
+      outboundNonce,
+      sendParam,
+      sourceOftAddress: write.deployment.address as `0x${string}`,
+      destinationOftAddress,
+      composeMsg: sendParam.composeMsg as `0x${string}`,
+      composeFrom: address,
+      composeTo: composerDeployment.address as `0x${string}`,
+      composeGas: BigInt(composeGas),
+      composeValue: composeValue,
+    };
   };
 
   return { ...write, send };
