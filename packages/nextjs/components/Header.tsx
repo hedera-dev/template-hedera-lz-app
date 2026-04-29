@@ -4,7 +4,6 @@ import React, { useRef } from "react";
 import {
   ArrowsRightLeftIcon,
   Bars3Icon,
-  BugAntIcon,
   CircleStackIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
@@ -24,11 +23,8 @@ const menuLinks: HeaderMenuLink[] = [
   { href: "/", label: "Home" },
   { href: "/bridge", label: "Bridge", icon: <ArrowsRightLeftIcon className="h-4 w-4" /> },
   { href: "/vault", label: "Vault", icon: <CircleStackIcon className="h-4 w-4" /> },
-  { href: "/vault-basic", label: "Vault Basic", icon: <CircleStackIcon className="h-4 w-4" /> },
   { href: "/strategy", label: "Strategy", icon: <CircleStackIcon className="h-4 w-4" /> },
-  { href: "/admin", label: "Admin", icon: <WrenchScrewdriverIcon className="h-4 w-4" /> },
   { href: "/mock-workers", label: "Workers", icon: <WrenchScrewdriverIcon className="h-4 w-4" /> },
-  { href: "/debug", label: "Debug", icon: <BugAntIcon className="h-4 w-4" /> },
 ];
 
 const HeaderMenuLinks = ({ onClick }: { onClick?: () => void }) => {

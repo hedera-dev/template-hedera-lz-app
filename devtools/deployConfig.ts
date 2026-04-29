@@ -58,7 +58,9 @@ export const DEPLOYMENT_CONFIG_STRATEGY: DeploymentConfig = {
             composer: 'MyOVaultComposerStrategy',
         },
         vaultAddress: undefined,
-        assetOFTAddress: undefined,
+        // Pin to current deployed MyHTSConnector to avoid stale/implicit resolution.
+        // Update this after a fresh chapter1-asset redeploy.
+        assetOFTAddress: '0x2Df2cD4AC708488caacdDC0118F0995e55C74f98',
         shareOFTAdapterAddress: undefined,
     },
     shareOFT: {

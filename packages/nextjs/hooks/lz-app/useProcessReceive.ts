@@ -29,7 +29,7 @@ async function safeReadContract(
       const data = encodeFunctionData({
         abi: params.abi as any,
         functionName: params.functionName,
-        args: params.args ?? [],
+        args: (params.args ?? []) as any,
       });
       
       const result = await client.request({
@@ -272,8 +272,10 @@ export const useProcessReceive = (chainId: 296 | 84532 = 296) => {
       dstOappB32,
     });
 
-    // Use explicit gas limit for Hedera to avoid gas estimation failures
-    const HEDERA_GAS_LIMIT = 1_500_000n;
+    // Match CLI simple-workers defaults. For strategy vault compose operations,
+    // the outer tx needs enough gas to forward composeGas (up to 12M) plus overhead.
+    // Hedera max is 15M, so use that to give maximum headroom for SaucerSwap swaps.
+    const HEDERA_GAS_LIMIT = 15_000_000n;
 
     const verifyHash = await dvn.writeContractAsync(
       "verify",
@@ -292,7 +294,7 @@ export const useProcessReceive = (chainId: 296 | 84532 = 296) => {
       guid,
       message,
       extraData: "0x",
-      gas: 1_000_000n,
+      gas: 3_000_000n,
       value: 0n,
     };
 
@@ -304,6 +306,7 @@ export const useProcessReceive = (chainId: 296 | 84532 = 296) => {
     await waitForHederaReceipt(destinationClient, commitExecuteHash as `0x${string}`);
 
     let composeHash: `0x${string}` | undefined;
+    let composeWarning: string | undefined;
     if (params.composeMsg && params.composeFrom && params.composeTo) {
       const amountReceivedLD = computeAmountReceivedLD({
         amount: params.amount,
@@ -317,20 +320,107 @@ export const useProcessReceive = (chainId: 296 | 84532 = 296) => {
         composeFrom: params.composeFrom,
         composeMsg: params.composeMsg,
       });
-      composeHash = (await executor.writeContractAsync(
-        "compose302",
-        [
-          params.dstOftAddress,
-          params.composeTo,
-          guid,
-          0,
-          composePayload,
-          "0x",
-          params.composeGas ?? 200_000n,
-        ],
-        { value: params.composeValue ?? 0n, gas: HEDERA_GAS_LIMIT },
-      )) as `0x${string}`;
-      await waitForHederaReceipt(destinationClient, composeHash);
+      // Strategy vault compose: vault deposit + strategy auto-invest (2 SaucerSwap swaps).
+      // Floor Hedera compose gas: older UI sends embedded 395000 when compose gas was wrongly tied to second-hop dstEid.
+      const MIN_HEDERA_COMPOSE_GAS = 12_000_000n;
+      const effectiveComposeGas =
+        params.composeGas != null && params.composeGas > MIN_HEDERA_COMPOSE_GAS
+          ? params.composeGas
+          : MIN_HEDERA_COMPOSE_GAS;
+      try {
+        composeHash = (await executor.writeContractAsync(
+          "compose302",
+          [
+            params.dstOftAddress,
+            params.composeTo,
+            guid,
+            0,
+            composePayload,
+            "0x",
+            effectiveComposeGas,
+          ],
+          { value: params.composeValue ?? 0n, gas: HEDERA_GAS_LIMIT },
+        )) as `0x${string}`;
+        await waitForHederaReceipt(destinationClient, composeHash);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Preserve the first submitted compose tx (e.g. reverted) before retry overwrites `composeHash`.
+        const firstComposeTxHash = composeHash;
+        // Retry once with maximum compose gas budget for Hedera.
+        try {
+          const retryComposeGas = 14_000_000n; // Near Hedera's 15M limit
+          composeHash = (await executor.writeContractAsync(
+            "compose302",
+            [
+              params.dstOftAddress,
+              params.composeTo,
+              guid,
+              0,
+              composePayload,
+              "0x",
+              retryComposeGas,
+            ],
+            { value: params.composeValue ?? 0n, gas: HEDERA_GAS_LIMIT },
+          )) as `0x${string}`;
+          await waitForHederaReceipt(destinationClient, composeHash);
+          composeWarning =
+            "compose302 needed a higher gas budget on Hedera; retried successfully with elevated gas.";
+          return {
+            verifyHash,
+            commitExecuteHash,
+            composeHash,
+            guid,
+            debug: {
+              srcEid: params.srcEid,
+              dstEid: params.dstEid,
+              nonce: params.nonce.toString(),
+              srcOftAddress: params.srcOftAddress,
+              dstOftAddress: params.dstOftAddress,
+              receiver: lzReceiveParam.receiver,
+              message,
+              decodedMessage: decodeOftMessage(message as `0x${string}`),
+              composeWarning,
+            },
+          };
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          const latestHash = composeHash ?? firstComposeTxHash;
+          const isLzSendReentrant =
+            msg.includes("LZ_SendReentrancy") ||
+            msg.includes("0xee120b09") ||
+            retryMsg.includes("LZ_SendReentrancy") ||
+            retryMsg.includes("0xee120b09");
+          const dualHashNote =
+            firstComposeTxHash && composeHash && firstComposeTxHash !== composeHash
+              ? ` First compose302 tx (HashScan): ${firstComposeTxHash}. Latest attempt: ${composeHash}.`
+              : latestHash
+                ? ` Open this compose302 transaction on HashScan: ${latestHash}.`
+                : ` No compose302 transaction hash was returned (wallet rejected or the transaction was not broadcast).`;
+          const noHashLzNote =
+            " No standalone compose302 tx on HashScan is normal here: LZ_SendReentrancy stops the nested second send — " +
+            "wagmi/simulation often reverts before a tx is broadcast, so there is nothing to open as a compose hash. " +
+            "Confirm the deposit using your verify + commit txs above.";
+          const dualHashNoteLz =
+            firstComposeTxHash && composeHash && firstComposeTxHash !== composeHash
+              ? ` First compose302 (HashScan): ${firstComposeTxHash}. Retry: ${composeHash}.`
+              : latestHash
+                ? ` Open compose302 on HashScan: ${latestHash}.`
+                : noHashLzNote;
+
+          if (isLzSendReentrant) {
+            composeWarning =
+              "Second-hop compose was blocked by LayerZero reentrancy guard (LZ_SendReentrancy). " +
+              "First-hop lzReceive settled on Hedera; the embedded onward send inside compose was intentionally blocked. " +
+              "Funds / vault position depend on composer strategy wiring — check balances and Vault UI; do not assume failure because no compose302 hash exists." +
+              dualHashNoteLz;
+          } else {
+            composeWarning =
+              "compose302 did not complete successfully (vault deposit / strategy on Hedera)." +
+              dualHashNote +
+              (retryMsg && retryMsg !== msg ? ` Initial error: ${msg}. Retry error: ${retryMsg}` : ` Details: ${msg}`);
+          }
+        }
+      }
     }
 
     return {
@@ -347,6 +437,7 @@ export const useProcessReceive = (chainId: 296 | 84532 = 296) => {
         receiver: lzReceiveParam.receiver,
         message,
         decodedMessage: decodeOftMessage(message as `0x${string}`),
+        composeWarning,
       },
     };
   };

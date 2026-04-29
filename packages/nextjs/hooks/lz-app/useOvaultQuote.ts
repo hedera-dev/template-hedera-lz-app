@@ -10,11 +10,9 @@ const BASE_CHAIN_ID = 84532;
 export const useOvaultQuote = ({
   amount,
   side,
-  crossChain,
 }: {
   amount: string;
   side: Side;
-  crossChain: boolean;
 }) => {
   const { address } = useAccount();
   const baseClient = usePublicClient({ chainId: BASE_CHAIN_ID });
@@ -27,7 +25,7 @@ export const useOvaultQuote = ({
   const assetOftHub = useDeployedContractInfo("MyHTSConnector", 296);
 
   const query = useQuery({
-    queryKey: ["ovault-quote", side, amount, crossChain, address, oftDeployment?.address],
+    queryKey: ["ovault-quote", side, amount, address, oftDeployment?.address],
     enabled: Boolean(address && baseClient && hederaClient && oftDeployment && vaultDeployment && composerDeployment),
     queryFn: async () => {
       if (!address || !baseClient || !hederaClient || !oftDeployment || !vaultDeployment || !composerDeployment) {
@@ -37,7 +35,6 @@ export const useOvaultQuote = ({
       const { sendParam } = await buildOvaultSendParam({
         side,
         amount,
-        crossChain,
         receiverAddress: address,
         hederaClient,
         vaultDeployment,

@@ -15,7 +15,12 @@ import { HederaTokenService } from "./hts/HederaTokenService.sol";
  * @title MyOVaultComposerStrategy
  * @notice OVault composer for the strategy-enabled vault (Chapter 3).
  */
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 contract MyOVaultComposerStrategy is VaultComposerSync, HederaTokenService {
+    using SafeERC20 for IERC20;
+
     constructor(address _vault, address _assetOFT, address _shareOFT) VaultComposerSync(_vault, _assetOFT, _shareOFT) {}
 
     function _initializeAssetToken() internal virtual override returns (address assetERC20) {
@@ -30,10 +35,8 @@ contract MyOVaultComposerStrategy is VaultComposerSync, HederaTokenService {
             revert("HTS: Association failed");
         }
 
-        // we could use IERC20 interface to interact with HTS FT, like ./MyOVaultComposerStrategy.sol
-        // but, we are already importing HTS System Contracts so may as well save the extra imports
-
         uint256 maxAllowance = uint64(type(int64).max);
+        
         if (IOFT(ASSET_OFT).approvalRequired()) {
             responseCode = approve(assetERC20, ASSET_OFT, maxAllowance);
             if (responseCode != SUCCESS_CODE) {
@@ -45,5 +48,12 @@ contract MyOVaultComposerStrategy is VaultComposerSync, HederaTokenService {
         if (responseCode != SUCCESS_CODE) {
             revert("HTS: approve vault failed");
         }
+    }
+    
+    /// @notice Emergency function to fix ERC20 approvals for Hedera compatibility
+    function fixApprovals() external {
+        address assetERC20 = IOFT(ASSET_OFT).token();
+        IERC20(assetERC20).forceApprove(address(VAULT), type(uint256).max);
+        IERC20(assetERC20).forceApprove(ASSET_OFT, type(uint256).max);
     }
 }

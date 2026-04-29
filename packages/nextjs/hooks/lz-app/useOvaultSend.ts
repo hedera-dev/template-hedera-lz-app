@@ -1,6 +1,7 @@
 "use client";
 
 import { useAccount, usePublicClient } from "wagmi";
+import { encodeFunctionData } from "viem";
 import { buildOvaultSendParam, normalizeQuote, Side } from "./ovaultSendParam";
 import { useDeployedContractInfo, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
 
@@ -28,6 +29,10 @@ const OAPP_PEER_ABI = [
     type: "function",
   },
 ] as const;
+const COMPOSER_OFTS_ABI = [
+  { inputs: [], name: "ASSET_OFT", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "SHARE_OFT", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+] as const;
 
 export const useOvaultSend = (side: Side) => {
   const { address } = useAccount();
@@ -40,7 +45,7 @@ export const useOvaultSend = (side: Side) => {
   const shareOftHub = useDeployedContractInfo("MyShareOFTAdapterStrategy", 296);
   const assetOftHub = useDeployedContractInfo("MyHTSConnector", 296);
 
-  const send = async (amount: string, crossChain: boolean) => {
+  const send = async (amount: string) => {
     if (!address) throw new Error("Connect wallet first");
     if (!write.deployment) throw new Error(`Missing deployment for ${contractName} on Base Sepolia`);
     if (!vaultDeployment || !composerDeployment) throw new Error("Missing hub composer/vault deployment");
@@ -49,7 +54,6 @@ export const useOvaultSend = (side: Side) => {
     const { amountWei, sendParam, composeValue, composeGas } = await buildOvaultSendParam({
       side,
       amount,
-      crossChain,
       receiverAddress: address,
       hederaClient,
       vaultDeployment,
@@ -88,8 +92,33 @@ export const useOvaultSend = (side: Side) => {
     const outboundNonce = BigInt(nonceRaw) + 1n;
 
     const txHash = (await write.writeContractAsync("send", [sendParam, quote, address], msgValue)) as `0x${string}`;
-    const destinationOftAddress =
-      side === "deposit" ? (assetOftHub?.address as `0x${string}` | undefined) : (shareOftHub?.address as `0x${string}` | undefined);
+
+    const readComposerAddress = async (fn: "ASSET_OFT" | "SHARE_OFT") => {
+      try {
+        const result = await hederaClient.readContract({
+          address: composerDeployment.address,
+          abi: COMPOSER_OFTS_ABI,
+          functionName: fn,
+        });
+        return result as `0x${string}`;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes("Position") || !msg.includes("out of bounds")) throw err;
+        const data = encodeFunctionData({
+          abi: COMPOSER_OFTS_ABI,
+          functionName: fn,
+          args: [],
+        });
+        const raw = (await hederaClient.request({
+          method: "eth_call",
+          params: [{ to: composerDeployment.address, data }, "latest"],
+        })) as `0x${string}`;
+        const body = raw.startsWith("0x") ? raw.slice(2).padStart(64, "0") : raw.padStart(64, "0");
+        return `0x${body.slice(-40)}` as `0x${string}`;
+      }
+    };
+
+    const destinationOftAddress = side === "deposit" ? await readComposerAddress("ASSET_OFT") : await readComposerAddress("SHARE_OFT");
 
     return {
       txHash,
