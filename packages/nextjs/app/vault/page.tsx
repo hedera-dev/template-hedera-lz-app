@@ -495,6 +495,18 @@ export default function VaultPage() {
   const verifyLink = processTimeline.verifyHash ? `https://hashscan.io/testnet/tx/${processTimeline.verifyHash}` : "";
   const commitLink = processTimeline.commitExecuteHash ? `https://hashscan.io/testnet/tx/${processTimeline.commitExecuteHash}` : "";
   const composeLink = processTimeline.composeHash ? `https://hashscan.io/testnet/tx/${processTimeline.composeHash}` : "";
+  const vaultLink = vaultDeployment?.address ? `https://hashscan.io/testnet/account/${vaultDeployment.address}` : "";
+  const strategyAddress = deployedContracts[296]?.HederaEtfStrategy?.address;
+  const strategyLink = strategyAddress ? `https://hashscan.io/testnet/account/${strategyAddress}` : "";
+  const composerLink = composerDeployment?.address ? `https://hashscan.io/testnet/account/${composerDeployment.address}` : "";
+  const assetOftLink = assetOftHub?.address ? `https://hashscan.io/testnet/account/${assetOftHub.address}` : "";
+  const shareOftLink = shareOftHub?.address ? `https://hashscan.io/testnet/account/${shareOftHub.address}` : "";
+  const routerLink = "https://hashscan.io/testnet/account/0x0000000000000000000000000000000000004b40";
+  const factoryLink = "https://hashscan.io/testnet/account/0x00000000000000000000000000000000000026e7";
+  const wethWhbarPairLink = "https://hashscan.io/testnet/account/0xa1Ada273b0D411F4B824B286558269fB08050B8f";
+  const wethHustlersPairLink = "https://hashscan.io/testnet/account/0x34aBd28828C37c6f6a7009D7B6484983FB6289dA";
+  const wethWhbarSaucerPoolLink = "https://testnet.saucerswap.finance/pool/0.0.8819477";
+  const wethHustlersSaucerPoolLink = "https://testnet.saucerswap.finance/pool/0.0.8823364";
 
   return (
     <div className="space-y-4">
@@ -675,6 +687,89 @@ export default function VaultPage() {
                   </a>
                 </p>
               ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {processTimeline.composeHash ? (
+          <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
+            <div className="font-medium">Post-invest verification links</div>
+            <div className="text-xs text-base-content/70">
+              Use these after compose succeeds to verify where value sits and where swaps executed.
+            </div>
+            <div className="text-xs space-y-1">
+              {vaultLink ? (
+                <p>
+                  Vault (share token):{" "}
+                  <a className="link font-mono break-all" href={vaultLink} target="_blank" rel="noreferrer">
+                    {vaultDeployment?.address}
+                  </a>
+                </p>
+              ) : null}
+              {strategyLink ? (
+                <p>
+                  ETF strategy basket:{" "}
+                  <a className="link font-mono break-all" href={strategyLink} target="_blank" rel="noreferrer">
+                    {strategyAddress}
+                  </a>
+                </p>
+              ) : null}
+              {composerLink ? (
+                <p>
+                  Composer:{" "}
+                  <a className="link font-mono break-all" href={composerLink} target="_blank" rel="noreferrer">
+                    {composerDeployment?.address}
+                  </a>
+                </p>
+              ) : null}
+              {assetOftLink ? (
+                <p>
+                  Asset OFT (hub):{" "}
+                  <a className="link font-mono break-all" href={assetOftLink} target="_blank" rel="noreferrer">
+                    {assetOftHub?.address}
+                  </a>
+                </p>
+              ) : null}
+              {shareOftLink ? (
+                <p>
+                  Share OFT (hub):{" "}
+                  <a className="link font-mono break-all" href={shareOftLink} target="_blank" rel="noreferrer">
+                    {shareOftHub?.address}
+                  </a>
+                </p>
+              ) : null}
+              <p>
+                Saucer Router V1:{" "}
+                <a className="link font-mono break-all" href={routerLink} target="_blank" rel="noreferrer">
+                  0x0000000000000000000000000000000000004b40
+                </a>
+              </p>
+              <p>
+                Saucer Factory V1:{" "}
+                <a className="link font-mono break-all" href={factoryLink} target="_blank" rel="noreferrer">
+                  0x00000000000000000000000000000000000026e7
+                </a>
+              </p>
+              <p>
+                WETH/WHBAR pair:{" "}
+                <a className="link font-mono break-all" href={wethWhbarPairLink} target="_blank" rel="noreferrer">
+                  0xa1Ada273b0D411F4B824B286558269fB08050B8f
+                </a>
+                {" · "}
+                <a className="link break-all" href={wethWhbarSaucerPoolLink} target="_blank" rel="noreferrer">
+                  Saucer pool 0.0.8819477
+                </a>
+              </p>
+              <p>
+                WETH/HUSTLERS pair:{" "}
+                <a className="link font-mono break-all" href={wethHustlersPairLink} target="_blank" rel="noreferrer">
+                  0x34aBd28828C37c6f6a7009D7B6484983FB6289dA
+                </a>
+                {" · "}
+                <a className="link break-all" href={wethHustlersSaucerPoolLink} target="_blank" rel="noreferrer">
+                  Saucer pool 0.0.8823364
+                </a>
+              </p>
             </div>
           </div>
         ) : null}
