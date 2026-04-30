@@ -30,6 +30,8 @@ type CatchUpStatus = {
 
 export default function BridgePage() {
   const [amount, setAmount] = useState("0.001");
+  const [fromChain, setFromChain] = useState<"base" | "hedera">("base");
+  const [toChain, setToChain] = useState<"base" | "hedera">("hedera");
   const [submittedTxHash, setSubmittedTxHash] = useState<`0x${string}` | undefined>();
   const [processTimeline, setProcessTimeline] = useState<ProcessTimeline>({});
   const [bridgeError, setBridgeError] = useState("");
@@ -39,6 +41,7 @@ export default function BridgePage() {
   const [processInFlight, setProcessInFlight] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<PendingBridgeMessage | undefined>();
   const [showCatchUp, setShowCatchUp] = useState(false);
+  const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
   const [pendingInfo, setPendingInfo] = useState<{
     pendingMessages: Array<{ nonce: bigint; recipient: `0x${string}`; amountLD: string }>;
     nextNonce: bigint;
@@ -72,9 +75,27 @@ export default function BridgePage() {
       return 0n;
     }
   })();
+  const amountOutEstimate = amountWei;
+  const routeSupported = fromChain === "base" && toChain === "hedera";
   const estimatedTotal = quote.fee + amountWei;
   const lzLink = useLayerZeroScanLink(submittedTxHash, 84532);
   const processSucceeded = Boolean(processTimeline.commitExecuteHash && processCompleted);
+  const hasStartedFlow = Boolean(submittedTxHash || pendingMessage || processTimeline.verifyHash || processTimeline.commitExecuteHash);
+  const sourceStepStatus = !submittedTxHash ? "idle" : sourceReceipt.isSuccess ? "success" : sourceReceipt.isError ? "error" : "pending";
+  const verifyStepStatus = !submittedTxHash
+    ? "idle"
+    : processTimeline.verifyHash
+      ? "success"
+      : processInFlight || processReceive.isPending
+        ? "pending"
+        : "idle";
+  const commitStepStatus = !submittedTxHash
+    ? "idle"
+    : processTimeline.commitExecuteHash && processCompleted
+      ? "success"
+      : processTimeline.commitExecuteHash || processInFlight || processReceive.isPending
+        ? "pending"
+        : "idle";
   const userFacingProcessError = useMemo(() => {
     if (!processError) return "";
     if (processError.includes("Position") && processError.includes("out of bounds")) {
@@ -152,6 +173,10 @@ export default function BridgePage() {
 
   const onSend = async () => {
     setBridgeError("");
+    if (!routeSupported) {
+      setBridgeError("Currently only Base Sepolia → Hedera Testnet is supported on this bridge page.");
+      return;
+    }
     if (!isBase) {
       await switchChainAsync({ chainId: 84532 });
       return;
@@ -224,22 +249,145 @@ export default function BridgePage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Bridge (Chapter 1)</h1>
-      <div className="card bg-base-200 p-4 space-y-3">
-        <label className="form-control">
-          <span className="label-text">Amount ETH</span>
-          <input className="input input-bordered" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </label>
-        <p className="text-sm text-base-content/70">Estimated fee: {quote.fee.toString()} wei</p>
-        <p className="text-sm text-base-content/70">Estimated total msg.value: {formatEther(estimatedTotal)} ETH</p>
+      <div className="card bg-base-200 p-4 md:p-5 space-y-4 border border-base-300">
+        <div className="card bg-base-100 border border-base-300 rounded-2xl p-4 md:p-5 space-y-5 overflow-hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Bridge Route</div>
+              <div className="text-xs text-base-content/60">Base Sepolia to Hedera Testnet</div>
+            </div>
+            <div className="badge badge-outline badge-sm">Chapter 1</div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 items-end">
+            <label className="form-control">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">From chain</span>
+              <div className="h-12 rounded-xl border border-base-300 bg-base-200/60 px-3 flex items-center">
+                <select
+                  className="w-full bg-transparent border-0 outline-none text-base font-medium"
+                  value={fromChain}
+                  onChange={(e) => {
+                    const nextFrom = e.target.value as "base" | "hedera";
+                    setFromChain(nextFrom);
+                    setToChain(nextFrom === "base" ? "hedera" : "base");
+                  }}
+                >
+                  <option value="base">Base Sepolia</option>
+                  <option value="hedera">Hedera Testnet</option>
+                </select>
+              </div>
+            </label>
+            <button
+              className="btn btn-circle btn-ghost btn-sm mb-1 border border-base-300 self-end bg-base-200/60"
+              onClick={() => {
+                const nextFrom = toChain;
+                const nextTo = fromChain;
+                setFromChain(nextFrom);
+                setToChain(nextTo);
+              }}
+              type="button"
+              aria-label="Swap chains"
+            >
+              ⇅
+            </button>
+            <label className="form-control">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">To chain</span>
+              <div className="h-12 rounded-xl border border-base-300 bg-base-200/60 px-3 flex items-center">
+                <select
+                  className="w-full bg-transparent border-0 outline-none text-base font-medium"
+                  value={toChain}
+                  onChange={(e) => {
+                    const nextTo = e.target.value as "base" | "hedera";
+                    setToChain(nextTo);
+                    setFromChain(nextTo === "base" ? "hedera" : "base");
+                  }}
+                >
+                  <option value="base">Base Sepolia</option>
+                  <option value="hedera">Hedera Testnet</option>
+                </select>
+              </div>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">You send (ETH)</span>
+              <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
+                <input
+                  className="input input-ghost h-10 px-0 text-lg font-semibold focus:outline-none min-w-0"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+                <span className="text-sm font-medium text-base-content/60">ETH</span>
+              </div>
+            </label>
+            <div className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">Estimated receive</span>
+              <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
+                <span className="text-lg font-semibold text-base-content/85">{formatEther(amountOutEstimate)}</span>
+                <span className="text-sm font-medium text-base-content/60">WETH-HTS</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
+            <span className="text-base-content/60">Estimated fee</span>{" "}
+            <span className="font-medium">{quote.fee.toString()} wei</span>
+          </div>
+          <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
+            <span className="text-base-content/60">Estimated total msg.value</span>{" "}
+            <span className="font-medium">{formatEther(estimatedTotal)} ETH</span>
+          </div>
+        </div>
         <p className="text-xs text-base-content/60">
           Quote status: {quote.isFetching ? "refreshing" : quote.isLoading ? "loading" : quote.ok ? "ready" : "error"}
           {quote.updatedAt ? ` - updated ${new Date(quote.updatedAt).toLocaleTimeString()}` : ""}
         </p>
-        {!isBase ? <div className="alert alert-warning">Switch to Base Sepolia to bridge.</div> : null}
-        <button className="btn btn-primary" onClick={onSend}>
-          {isBase ? "Send Bridge Tx" : "Switch to Base Sepolia"}
+        {!routeSupported ? (
+          <div className="alert alert-warning text-sm">This page currently supports Base Sepolia → Hedera Testnet only.</div>
+        ) : !isBase ? (
+          <div className="alert alert-warning text-sm">Switch to Base Sepolia to submit the source bridge transaction.</div>
+        ) : null}
+        <button className="btn btn-primary" onClick={onSend} disabled={bridge.isPending}>
+          {bridge.isPending ? <span className="loading loading-spinner loading-sm" /> : null}
+          {routeSupported ? (isBase ? "Bridge now" : "Switch to Base Sepolia") : "Route not supported yet"}
         </button>
         {bridgeError ? <div className="alert alert-error text-sm">{bridgeError}</div> : null}
+
+        {hasStartedFlow ? (
+          <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
+            <div className="font-medium">Progress</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+              <div className="border border-base-300 rounded p-2">
+                <div className="font-semibold mb-1">1. Source sent</div>
+                <span
+                  className={`badge ${
+                    sourceStepStatus === "success"
+                      ? "badge-success"
+                      : sourceStepStatus === "error"
+                        ? "badge-error"
+                        : sourceStepStatus === "pending"
+                          ? "badge-warning"
+                          : "badge-ghost"
+                  }`}
+                >
+                  {sourceStepStatus}
+                </span>
+              </div>
+              <div className="border border-base-300 rounded p-2">
+                <div className="font-semibold mb-1">2. DVN verify</div>
+                <span className={`badge ${verifyStepStatus === "success" ? "badge-success" : verifyStepStatus === "pending" ? "badge-warning" : "badge-ghost"}`}>
+                  {verifyStepStatus}
+                </span>
+              </div>
+              <div className="border border-base-300 rounded p-2">
+                <div className="font-semibold mb-1">3. Commit execute</div>
+                <span className={`badge ${commitStepStatus === "success" ? "badge-success" : commitStepStatus === "pending" ? "badge-warning" : "badge-ghost"}`}>
+                  {commitStepStatus}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {submittedTxHash ? (
           <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
@@ -316,76 +464,73 @@ export default function BridgePage() {
           </div>
         ) : null}
 
-        <div className="card bg-base-100 border border-warning/50 p-3 space-y-2">
-          <div className="font-medium text-warning">Nonce Gap Recovery</div>
-          <p className="text-xs text-base-content/70">
-            If you see &quot;Nonce X is ahead of sequence&quot; errors, use this to process all pending messages in order.
-          </p>
-          <button
-            className="btn btn-warning btn-sm"
-            onClick={onCheckPending}
-            disabled={pendingMessages.isLoading}
-          >
-            {pendingMessages.isLoading ? "Checking..." : "Check Pending Messages"}
-          </button>
+        <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-medium">Advanced: Nonce Gap Recovery</div>
+            <button className="btn btn-ghost btn-xs" onClick={() => setShowRecoveryPanel(v => !v)}>
+              {showRecoveryPanel ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showRecoveryPanel ? (
+            <>
+              <p className="text-xs text-base-content/70">
+                If you see &quot;Nonce X is ahead of sequence&quot; errors, process pending messages in order.
+              </p>
+              <button className="btn btn-warning btn-sm" onClick={onCheckPending} disabled={pendingMessages.isLoading}>
+                {pendingMessages.isLoading ? "Checking..." : "Check Pending Messages"}
+              </button>
 
-          {showCatchUp && pendingInfo ? (
-            <div className="bg-base-200 border border-base-300 rounded p-3 space-y-2">
-              <div className="text-sm">
-                <span className="font-medium">Status:</span> Next expected nonce: {pendingInfo.nextNonce.toString()}, 
-                Latest sent: {pendingInfo.latestOutboundNonce.toString()}
-              </div>
-              <div className="text-sm">
-                <span className="font-medium">Pending messages:</span> {pendingInfo.pendingCount} total, {pendingInfo.pendingMessages.length} found on-chain
-              </div>
-
-              {pendingInfo.pendingMessages.length > 0 ? (
-                <>
-                  <div className="max-h-32 overflow-y-auto text-xs space-y-1">
-                    {pendingInfo.pendingMessages.slice(0, 10).map((msg) => (
-                      <div key={msg.nonce.toString()} className="flex justify-between">
-                        <span>Nonce {msg.nonce.toString()}</span>
-                        <span>{msg.amountLD} ETH → {msg.recipient.slice(0, 8)}...</span>
-                      </div>
-                    ))}
-                    {pendingInfo.pendingMessages.length > 10 && (
-                      <div className="text-base-content/50">...and {pendingInfo.pendingMessages.length - 10} more</div>
-                    )}
+              {showCatchUp && pendingInfo ? (
+                <div className="bg-base-200 border border-base-300 rounded p-3 space-y-2">
+                  <div className="text-sm">
+                    <span className="font-medium">Status:</span> Next expected nonce: {pendingInfo.nextNonce.toString()}, Latest sent:{" "}
+                    {pendingInfo.latestOutboundNonce.toString()}
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-medium">Pending messages:</span> {pendingInfo.pendingCount} total, {pendingInfo.pendingMessages.length} found on-chain
                   </div>
 
-                  <button
-                    className="btn btn-primary btn-sm w-full"
-                    onClick={onCatchUp}
-                    disabled={catchUpStatus.isProcessing || !isHedera}
-                  >
-                    {!isHedera
-                      ? "Switch to Hedera First"
-                      : catchUpStatus.isProcessing
-                      ? `Processing nonce ${catchUpStatus.currentNonce?.toString()} (${catchUpStatus.processedCount}/${catchUpStatus.totalCount})`
-                      : `Process All ${pendingInfo.pendingMessages.length} Messages`}
-                  </button>
+                  {pendingInfo.pendingMessages.length > 0 ? (
+                    <>
+                      <div className="max-h-32 overflow-y-auto text-xs space-y-1">
+                        {pendingInfo.pendingMessages.slice(0, 10).map((msg) => (
+                          <div key={msg.nonce.toString()} className="flex justify-between">
+                            <span>Nonce {msg.nonce.toString()}</span>
+                            <span>{msg.amountLD} ETH → {msg.recipient.slice(0, 8)}...</span>
+                          </div>
+                        ))}
+                        {pendingInfo.pendingMessages.length > 10 ? (
+                          <div className="text-base-content/50">...and {pendingInfo.pendingMessages.length - 10} more</div>
+                        ) : null}
+                      </div>
 
-                  {catchUpStatus.processedCount > 0 && !catchUpStatus.isProcessing && (
-                    <div className="alert alert-success text-xs">
-                      Successfully processed {catchUpStatus.processedCount} messages!
-                    </div>
-                  )}
+                      <button className="btn btn-primary btn-sm w-full" onClick={onCatchUp} disabled={catchUpStatus.isProcessing || !isHedera}>
+                        {!isHedera
+                          ? "Switch to Hedera First"
+                          : catchUpStatus.isProcessing
+                            ? `Processing nonce ${catchUpStatus.currentNonce?.toString()} (${catchUpStatus.processedCount}/${catchUpStatus.totalCount})`
+                            : `Process All ${pendingInfo.pendingMessages.length} Messages`}
+                      </button>
 
-                  {catchUpStatus.errors.length > 0 && (
-                    <div className="alert alert-error text-xs whitespace-pre-wrap">
-                      {catchUpStatus.errors.join("\n")}
+                      {catchUpStatus.processedCount > 0 && !catchUpStatus.isProcessing ? (
+                        <div className="alert alert-success text-xs">Successfully processed {catchUpStatus.processedCount} messages!</div>
+                      ) : null}
+
+                      {catchUpStatus.errors.length > 0 ? (
+                        <div className="alert alert-error text-xs whitespace-pre-wrap">{catchUpStatus.errors.join("\n")}</div>
+                      ) : null}
+                    </>
+                  ) : pendingInfo.pendingCount > 0 ? (
+                    <div className="alert alert-warning text-xs">
+                      {pendingInfo.pendingCount} messages are pending but couldn&apos;t find them in recent blocks. They may be too old. Try the Simple
+                      Workers page with manual nonce entry.
                     </div>
+                  ) : (
+                    <div className="alert alert-success text-xs">All messages have been processed. No pending nonces.</div>
                   )}
-                </>
-              ) : pendingInfo.pendingCount > 0 ? (
-                <div className="alert alert-warning text-xs">
-                  {pendingInfo.pendingCount} messages are pending but couldn&apos;t find them in recent blocks. 
-                  They may be too old. Try the Simple Workers page with manual nonce entry.
                 </div>
-              ) : (
-                <div className="alert alert-success text-xs">All messages have been processed. No pending nonces.</div>
-              )}
-            </div>
+              ) : null}
+            </>
           ) : null}
         </div>
 
