@@ -97,17 +97,23 @@ export default function VaultPage() {
   const { switchChainAsync } = useSwitchChain();
   const isBase = chainId === 84532;
   const isHedera = chainId === 296;
+  const sourceChainId = mode === "deposit" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const isOnSourceChain = mode === "deposit" ? isBase : isHedera;
   const quote = useOvaultQuote({ amount, side: mode });
   const tx = useOvaultSend(mode);
   const processReceive = useProcessReceive(296);
-  const lzLink = useLayerZeroScanLink(submittedTxHash, 84532);
-  const baseScanLink = submittedTxHash ? `https://sepolia.basescan.org/tx/${submittedTxHash}` : "";
+  const lzLink = useLayerZeroScanLink(submittedTxHash, sourceChainId === BASE_CHAIN_ID ? BASE_CHAIN_ID : HEDERA_CHAIN_ID);
+  const sourceTxLink = submittedTxHash
+    ? sourceChainId === BASE_CHAIN_ID
+      ? `https://sepolia.basescan.org/tx/${submittedTxHash}`
+      : `https://hashscan.io/testnet/tx/${submittedTxHash}`
+    : "";
   const destinationContractAddress = deployedContracts[296]?.MyOVaultComposerStrategy?.address;
   const hashscanLink = destinationContractAddress
     ? `https://hashscan.io/testnet/account/${destinationContractAddress}`
     : "https://hashscan.io/testnet";
   const receipt = useWaitForTransactionReceipt({
-    chainId: 84532,
+    chainId: sourceChainId,
     hash: submittedTxHash,
     query: { enabled: Boolean(submittedTxHash) },
   });
@@ -147,13 +153,18 @@ export default function VaultPage() {
   const onSubmit = async () => {
     setSubmitError("");
     setProcessError("");
-    if (!isBase) {
-      await switchChainAsync({ chainId: 84532 });
+    if (!isOnSourceChain) {
+      await switchChainAsync({ chainId: sourceChainId });
       return;
     }
     try {
       const sent = await tx.send(amount);
       setSubmittedTxHash(sent.txHash);
+      if (!sent.needsProcessing) {
+        setPendingMessage(undefined);
+        setProcessLog("Redeem/divest submitted locally on Hedera. No LayerZero worker processing is required.");
+        return;
+      }
       if (!sent.destinationOftAddress) {
         throw new Error("Missing destination OFT deployment for processing");
       }
@@ -533,12 +544,16 @@ export default function VaultPage() {
           {quote.updatedAt ? ` - updated ${new Date(quote.updatedAt).toLocaleTimeString()}` : ""}
         </p>
         <p className="text-xs font-mono bg-base-300 p-2 rounded">composeMsg preview: {composePreview}</p>
-        {!isBase ? <div className="alert alert-warning">Switch to Base Sepolia to {mode}.</div> : null}
+        {!isOnSourceChain ? (
+          <div className="alert alert-warning">
+            Switch to {mode === "deposit" ? "Base Sepolia" : "Hedera Testnet"} to {mode}.
+          </div>
+        ) : null}
         <button className="btn btn-primary" onClick={onSubmit} disabled={tx.isPending || receipt.isLoading}>
           {tx.isPending || receipt.isLoading ? (
             <span className="loading loading-spinner loading-sm" />
           ) : null}
-          {isBase ? `Submit ${mode}` : "Switch to Base Sepolia"}
+          {isOnSourceChain ? `Submit ${mode}` : `Switch to ${mode === "deposit" ? "Base Sepolia" : "Hedera Testnet"}`}
         </button>
         {submitError ? <div className="alert alert-error text-sm">{submitError}</div> : null}
 
@@ -558,13 +573,17 @@ export default function VaultPage() {
             {!receipt.isSuccess ? (
               <progress className="progress progress-primary w-full" />
             ) : (
-              <div className="text-sm text-success">Funds locked on Base. Ready for Hedera processing.</div>
+              <div className="text-sm text-success">
+                {mode === "deposit"
+                  ? "Funds locked on Base. Ready for Hedera processing."
+                  : "Redeem/divest submitted on Hedera. No worker processing is required."}
+              </div>
             )}
             <div className="flex flex-wrap gap-3 text-sm">
-              <a className="link inline-flex items-center gap-1" href={baseScanLink} target="_blank" rel="noreferrer">
-                BaseScan <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+              <a className="link inline-flex items-center gap-1" href={sourceTxLink} target="_blank" rel="noreferrer">
+                {sourceChainId === BASE_CHAIN_ID ? "BaseScan" : "HashScan"} <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
               </a>
-              {lzLink ? (
+              {mode === "deposit" && lzLink ? (
                 <a className="link inline-flex items-center gap-1" href={lzLink} target="_blank" rel="noreferrer">
                   LayerZero Scan <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
                 </a>
@@ -657,8 +676,8 @@ export default function VaultPage() {
             <div className="text-xs space-y-1">
               {submittedTxHash ? (
                 <p>
-                  Source send:{" "}
-                  <a className="link font-mono break-all" href={baseScanLink} target="_blank" rel="noreferrer">
+                  {mode === "deposit" ? "Source send" : "Local redeem/divest"}:{" "}
+                  <a className="link font-mono break-all" href={sourceTxLink} target="_blank" rel="noreferrer">
                     {submittedTxHash}
                   </a>
                 </p>

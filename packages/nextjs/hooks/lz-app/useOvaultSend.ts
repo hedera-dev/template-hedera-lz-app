@@ -1,12 +1,13 @@
 "use client";
 
 import { useAccount, usePublicClient } from "wagmi";
-import { encodeFunctionData } from "viem";
-import { buildOvaultSendParam, normalizeQuote, Side } from "./ovaultSendParam";
+import { encodeFunctionData, parseEther } from "viem";
+import { addressToBytes32, buildOvaultSendParam, HEDERA_EID, normalizeQuote, Side } from "./ovaultSendParam";
 import { useDeployedContractInfo, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
 
 const BASE_CHAIN_ID = 84532;
-const HEDERA_EID = 40285;
+const HEDERA_CHAIN_ID = 296;
+const HEDERA_GAS_LIMIT = 15_000_000n;
 const ENDPOINT_ABI = [
   {
     inputs: [
@@ -33,23 +34,106 @@ const COMPOSER_OFTS_ABI = [
   { inputs: [], name: "ASSET_OFT", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "SHARE_OFT", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
 ] as const;
+const ERC20_ALLOWANCE_APPROVE_ABI = [
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
 
 export const useOvaultSend = (side: Side) => {
   const { address } = useAccount();
   const baseClient = usePublicClient({ chainId: BASE_CHAIN_ID });
-  const hederaClient = usePublicClient({ chainId: 296 });
+  const hederaClient = usePublicClient({ chainId: HEDERA_CHAIN_ID });
   const contractName = side === "deposit" ? "MyNativeOFTAdapter" : "MyShareOFT";
   const write = useScaffoldWriteContract(contractName, BASE_CHAIN_ID);
-  const vaultDeployment = useDeployedContractInfo("MyERC4626Strategy", 296);
-  const composerDeployment = useDeployedContractInfo("MyOVaultComposerStrategy", 296);
-  const shareOftHub = useDeployedContractInfo("MyShareOFTAdapterStrategy", 296);
-  const assetOftHub = useDeployedContractInfo("MyHTSConnector", 296);
+  const composerWrite = useScaffoldWriteContract("MyOVaultComposerStrategy", HEDERA_CHAIN_ID);
+  const vaultWrite = useScaffoldWriteContract("MyERC4626Strategy", HEDERA_CHAIN_ID);
+  const vaultDeployment = useDeployedContractInfo("MyERC4626Strategy", HEDERA_CHAIN_ID);
+  const composerDeployment = useDeployedContractInfo("MyOVaultComposerStrategy", HEDERA_CHAIN_ID);
+  const shareOftHub = useDeployedContractInfo("MyShareOFTAdapterStrategy", HEDERA_CHAIN_ID);
+  const assetOftHub = useDeployedContractInfo("MyHTSConnector", HEDERA_CHAIN_ID);
 
   const send = async (amount: string) => {
     if (!address) throw new Error("Connect wallet first");
-    if (!write.deployment) throw new Error(`Missing deployment for ${contractName} on Base Sepolia`);
     if (!vaultDeployment || !composerDeployment) throw new Error("Missing hub composer/vault deployment");
     if (!baseClient || !hederaClient) throw new Error("Missing public client for Base/Hedera");
+
+    if (side === "redeem") {
+      if (!assetOftHub?.address) throw new Error("Missing hub asset OFT deployment");
+
+      const shareAmount = parseEther(amount || "0");
+      const previewRaw = await hederaClient.readContract({
+        address: vaultDeployment.address,
+        abi: vaultDeployment.abi,
+        functionName: "previewRedeem",
+        args: [shareAmount],
+      });
+      const expectedAssets = previewRaw as unknown as bigint;
+      const sendParam = {
+        dstEid: HEDERA_EID,
+        to: addressToBytes32(address),
+        amountLD: expectedAssets,
+        minAmountLD: expectedAssets,
+        extraOptions: "0x" as `0x${string}`,
+        composeMsg: "0x" as `0x${string}`,
+        oftCmd: "0x" as `0x${string}`,
+      };
+
+      const allowance = (await hederaClient.readContract({
+        address: vaultDeployment.address,
+        abi: ERC20_ALLOWANCE_APPROVE_ABI,
+        functionName: "allowance",
+        args: [address, composerDeployment.address],
+      })) as bigint;
+
+      if (allowance < shareAmount) {
+        const approveHash = (await vaultWrite.writeContractAsync(
+          "approve",
+          [composerDeployment.address, shareAmount],
+          { gas: 1_000_000n },
+        )) as `0x${string}`;
+        await hederaClient.waitForTransactionReceipt({ hash: approveHash });
+      }
+
+      const txHash = (await composerWrite.writeContractAsync(
+        "redeemAndSend",
+        [shareAmount, sendParam, address],
+        { value: 0n, gas: HEDERA_GAS_LIMIT },
+      )) as `0x${string}`;
+
+      return {
+        txHash,
+        outboundNonce: 0n,
+        sendParam,
+        sourceOftAddress: shareOftHub?.address ?? (vaultDeployment.address as `0x${string}`),
+        destinationOftAddress: assetOftHub.address as `0x${string}`,
+        composeMsg: undefined,
+        composeFrom: address,
+        composeTo: composerDeployment.address as `0x${string}`,
+        composeGas: 0n,
+        composeValue: 0n,
+        needsProcessing: false,
+      };
+    }
+
+    if (!write.deployment) throw new Error(`Missing deployment for ${contractName} on Base Sepolia`);
 
     const { amountWei, sendParam, composeValue, composeGas } = await buildOvaultSendParam({
       side,
@@ -76,7 +160,8 @@ export const useOvaultSend = (side: Side) => {
       address: write.deployment.address,
       abi: write.deployment.abi,
       functionName: "endpoint",
-    })) as `0x${string}`;
+      args: [],
+    })) as unknown as `0x${string}`;
     const peer = (await baseClient.readContract({
       address: write.deployment.address,
       abi: OAPP_PEER_ABI,
@@ -131,6 +216,7 @@ export const useOvaultSend = (side: Side) => {
       composeTo: composerDeployment.address as `0x${string}`,
       composeGas: BigInt(composeGas),
       composeValue: composeValue,
+      needsProcessing: true,
     };
   };
 

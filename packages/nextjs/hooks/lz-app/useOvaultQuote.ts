@@ -26,8 +26,15 @@ export const useOvaultQuote = ({
 
   const query = useQuery({
     queryKey: ["ovault-quote", side, amount, address, oftDeployment?.address],
-    enabled: Boolean(address && baseClient && hederaClient && oftDeployment && vaultDeployment && composerDeployment),
+    enabled:
+      side === "redeem"
+        ? Boolean(address)
+        : Boolean(address && baseClient && hederaClient && oftDeployment && vaultDeployment && composerDeployment),
     queryFn: async () => {
+      // Redeem/divest is local on Hedera: composer.redeemAndSend() redeems shares and
+      // transfers the asset locally, so there is no LayerZero message fee.
+      if (side === "redeem") return 0n;
+
       if (!address || !baseClient || !hederaClient || !oftDeployment || !vaultDeployment || !composerDeployment) {
         return 0n;
       }

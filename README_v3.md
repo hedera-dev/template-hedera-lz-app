@@ -94,7 +94,7 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 
 ### Step 4: Send Tokens Cross-Chain
 
-Send 0.01 ETH from Base to Hedera:
+**Base → Hedera:** Send 0.01 ETH from Base to Hedera:
 
 ```bash
 pnpm hardhat lz:oft:send \
@@ -104,6 +104,19 @@ pnpm hardhat lz:oft:send \
   --to 0xYOUR_ADDRESS \
   --simple-workers
 ```
+
+**Hedera → Base:** Send HTS-wrapped ETH back to Base as native ETH:
+
+```bash
+pnpm hardhat lz:oft:send \
+  --src-eid 40285 \
+  --dst-eid 40245 \
+  --amount 0.01 \
+  --to 0xYOUR_ADDRESS \
+  --simple-workers
+```
+
+> **Note:** The task automatically handles HTS token approval via the Hedera precompile. Ensure you have HTS-wrapped WETH tokens on Hedera (from a previous Base → Hedera transfer) and that the `MyNativeOFTAdapter` on Base has sufficient locked ETH to unlock.
 
 **Endpoint IDs:**
 - Base Sepolia: `40245`
@@ -302,6 +315,18 @@ export default createMeshConfig({
 ### "Transaction reverted: HTS association failed"
 
 The contract needs to be associated with the HTS token before receiving it. This is handled automatically by the contracts, but ensure you have enough HBAR for the association fee.
+
+### "Hedera → Base bridge fails" / "Insufficient liquidity"
+
+The `MyNativeOFTAdapter` on Base uses a lock/unlock model. To bridge back from Hedera:
+1. The adapter must have enough locked ETH (from previous Base→Hedera transfers)
+2. Your account needs HTS-wrapped WETH tokens on Hedera
+3. The task auto-approves HTS tokens via the Hedera precompile
+
+Check adapter balance:
+```bash
+cast balance <MY_NATIVE_OFT_ADAPTER_ADDRESS> --rpc-url $RPC_URL_BASE_SEPOLIA
+```
 
 ### "Insufficient funds for gas"
 
