@@ -145,7 +145,7 @@ export async function sendEvm(
             if (!erc20) {
                 throw new Error('Approval required but underlying token is native')
             }
-            logger.info('OFT Adapter detected - checking ERC20 allowance...')
+            logger.info('OFT Adapter detected - checking allowance...')
 
             // Check current allowance
             const currentAllowance = await erc20.allowance(signer.address, wrapperAddress)
@@ -153,11 +153,34 @@ export async function sendEvm(
             logger.info(`Required amount: ${amountUnits.toString()}`)
 
             if (currentAllowance.lt(amountUnits)) {
-                logger.info('Insufficient allowance - approving ERC20 tokens...')
-                const approveTx = await erc20.approve(wrapperAddress, amountUnits)
-                logger.info(`Approval transaction hash: ${approveTx.hash}`)
-                await approveTx.wait()
-                logger.info('ERC20 approval confirmed')
+                // Check if this is Hedera (uses HTS precompile for approvals)
+                const isHedera = srcEid === 40285 // HEDERA_V2_TESTNET
+                
+                if (isHedera) {
+                    logger.info('Hedera detected - using HTS precompile for approval...')
+                    const HTS_PRECOMPILE = '0x0000000000000000000000000000000000000167'
+                    const htsApproveAbi = [
+                        'function approve(address token, address spender, uint256 amount) external returns (int64)'
+                    ]
+                    const htsPrecompile = new Contract(HTS_PRECOMPILE, htsApproveAbi, signer)
+                    
+                    // HTS max allowance is int64 max (2^63 - 1)
+                    const htsMaxAllowance = BigNumber.from(2).pow(63).sub(1)
+                    const approveAmount = amountUnits.gt(htsMaxAllowance) ? htsMaxAllowance : amountUnits
+                    
+                    const approveTx = await htsPrecompile.approve(underlying, wrapperAddress, approveAmount, {
+                        gasLimit: 1_500_000,
+                    })
+                    logger.info(`HTS Approval transaction hash: ${approveTx.hash}`)
+                    await approveTx.wait()
+                    logger.info('HTS approval confirmed')
+                } else {
+                    logger.info('Insufficient allowance - approving ERC20 tokens...')
+                    const approveTx = await erc20.approve(wrapperAddress, amountUnits)
+                    logger.info(`Approval transaction hash: ${approveTx.hash}`)
+                    await approveTx.wait()
+                    logger.info('ERC20 approval confirmed')
+                }
             } else {
                 logger.info('Sufficient allowance already exists')
             }
@@ -295,11 +318,28 @@ export async function sendEvm(
 
     logger.info('Sending the transaction...')
     let tx: ContractTransaction
-    const msgValue = isNative ? msgFee.nativeFee.add(amountUnits) : msgFee.nativeFee
+    
+    // Hedera JSON-RPC transaction value is wei-like, while contracts see msg.value in tinybars.
+    // Keep the LayerZero fee struct in contract units and scale only the transaction value.
+    const isHedera = srcEid === 40285 // HEDERA_V2_TESTNET
+    const HEDERA_TINYBAR_TO_WEIBAR = BigNumber.from('10000000000')
+
+    // Calculate msg.value
+    let msgValue = isNative ? msgFee.nativeFee.add(amountUnits) : msgFee.nativeFee
+    if (isHedera) {
+        msgValue = msgValue.mul(HEDERA_TINYBAR_TO_WEIBAR)
+        logger.info(`Hedera detected - scaled tx value to ${msgValue.toString()} wei`)
+    }
+    
+    // Transaction options - add explicit gasLimit for Hedera to bypass estimation issues
+    const txOptions: { value: BigNumber; gasLimit?: number } = { value: msgValue }
+    if (isHedera) {
+        txOptions.gasLimit = 3_000_000 // Explicit gas limit for Hedera
+        logger.info('Using explicit gasLimit: 3000000 for Hedera')
+    }
+    
     try {
-        tx = await oft.send(sendParam, msgFee, signer.address, {
-            value: msgValue,
-        })
+        tx = await oft.send(sendParam, msgFee, signer.address, txOptions)
     } catch (error) {
         DebugLogger.printErrorAndFixSuggestion(
             KnownErrors.ERROR_SENDING_TRANSACTION,

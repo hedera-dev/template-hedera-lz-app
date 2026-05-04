@@ -1,13 +1,42 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { parseEther, parseAbiItem, decodeEventLog } from "viem";
-import { useAccount, usePublicClient } from "wagmi";
-import { useDeployedContractInfo, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
+import { parseEther, decodeEventLog } from "viem";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import { useDeployedContractInfo } from "~~/hooks/scaffold-hbar";
 
 const BASE_CHAIN_ID = 84532;
+const BASE_EID = 40245;
+const HEDERA_CHAIN_ID = 296;
 const HEDERA_EID = 40285;
+const HEDERA_TINYBAR_TO_WEIBAR = 10_000_000_000n;
+const HTS_PRECOMPILE = "0x0000000000000000000000000000000000000167" as const;
 const ZERO_EVM_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
+const ERC20_ALLOWANCE_ABI = [
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+const HTS_PRECOMPILE_ABI = [
+  {
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    name: "approve",
+    outputs: [{ name: "responseCode", type: "int64" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
 const ENDPOINT_ABI = [
   {
     inputs: [
@@ -44,6 +73,31 @@ const OAPP_PEER_ABI = [
   },
 ] as const;
 
+export type BridgeRoute = {
+  fromChain: "base" | "hedera";
+  toChain: "base" | "hedera";
+};
+
+const getBridgeRouteConfig = (route: BridgeRoute) => {
+  const sourceChainId = route.fromChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const destinationChainId = route.toChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const srcEid = route.fromChain === "base" ? BASE_EID : HEDERA_EID;
+  const dstEid = route.toChain === "base" ? BASE_EID : HEDERA_EID;
+  const sourceContractName = route.fromChain === "base" ? "MyNativeOFTAdapter" : "MyHTSConnector";
+  const destinationContractName = route.toChain === "base" ? "MyNativeOFTAdapter" : "MyHTSConnector";
+  const isNativeSource = sourceContractName === "MyNativeOFTAdapter";
+
+  return {
+    sourceChainId,
+    destinationChainId,
+    srcEid,
+    dstEid,
+    sourceContractName,
+    destinationContractName,
+    isNativeSource,
+  };
+};
+
 const addressToBytes32 = (address: `0x${string}`): `0x${string}` => {
   return `0x${address.slice(2).padStart(64, "0")}` as `0x${string}`;
 };
@@ -54,12 +108,12 @@ const normalizeQuote = (quoteRaw: unknown): { nativeFee: bigint; lzTokenFee: big
   return quoteRaw as { nativeFee: bigint; lzTokenFee: bigint };
 };
 
-const buildBridgeSendParam = (amount: string, recipient: `0x${string}`) => {
+const buildBridgeSendParam = (amount: string, recipient: `0x${string}`, dstEid: number) => {
   const amountWei = parseEther(amount || "0");
   return {
     amountWei,
     sendParam: {
-      dstEid: HEDERA_EID,
+      dstEid,
       to: addressToBytes32(recipient),
       amountLD: amountWei,
       minAmountLD: amountWei,
@@ -70,17 +124,26 @@ const buildBridgeSendParam = (amount: string, recipient: `0x${string}`) => {
   };
 };
 
-export const useBridgeQuote = (amount: string) => {
+const getBridgeTxValue = (nativeFee: bigint, amountWei: bigint, cfg: ReturnType<typeof getBridgeRouteConfig>) => {
+  const contractValue = cfg.isNativeSource ? nativeFee + amountWei : nativeFee;
+
+  // Hedera JSON-RPC value is wei-like, while contracts observe msg.value in tinybars.
+  // Scale only the transaction value; keep the LayerZero fee struct unchanged.
+  return cfg.sourceChainId === HEDERA_CHAIN_ID ? contractValue * HEDERA_TINYBAR_TO_WEIBAR : contractValue;
+};
+
+export const useBridgeQuote = (amount: string, route: BridgeRoute = { fromChain: "base", toChain: "hedera" }) => {
   const { address } = useAccount();
-  const publicClient = usePublicClient({ chainId: BASE_CHAIN_ID });
-  const deployment = useDeployedContractInfo("MyNativeOFTAdapter", BASE_CHAIN_ID);
+  const cfg = getBridgeRouteConfig(route);
+  const publicClient = usePublicClient({ chainId: cfg.sourceChainId });
+  const deployment = useDeployedContractInfo(cfg.sourceContractName, cfg.sourceChainId);
 
   const query = useQuery({
-    queryKey: ["bridge-quote", amount, address, deployment?.address],
+    queryKey: ["bridge-quote", amount, address, route.fromChain, route.toChain, deployment?.address],
     enabled: Boolean(publicClient && deployment),
     queryFn: async () => {
       if (!publicClient || !deployment) return 0n;
-      const { sendParam } = buildBridgeSendParam(amount, (address ?? ZERO_EVM_ADDRESS) as `0x${string}`);
+      const { sendParam } = buildBridgeSendParam(amount, (address ?? ZERO_EVM_ADDRESS) as `0x${string}`, cfg.dstEid);
       const quoteRaw = await publicClient.readContract({
         address: deployment.address,
         abi: deployment.abi,
@@ -101,43 +164,79 @@ export const useBridgeQuote = (amount: string) => {
   };
 };
 
-export const useBridgeSend = () => {
+export const useBridgeSend = (route: BridgeRoute = { fromChain: "base", toChain: "hedera" }) => {
   const { address } = useAccount();
-  const publicClient = usePublicClient({ chainId: BASE_CHAIN_ID });
-  const write = useScaffoldWriteContract("MyNativeOFTAdapter", BASE_CHAIN_ID);
-  const hederaAssetOft = useDeployedContractInfo("MyHTSConnector", 296);
+  const cfg = getBridgeRouteConfig(route);
+  const publicClient = usePublicClient({ chainId: cfg.sourceChainId });
+  const write = useWriteContract();
+  const sourceDeployment = useDeployedContractInfo(cfg.sourceContractName, cfg.sourceChainId);
+  const destinationOft = useDeployedContractInfo(cfg.destinationContractName, cfg.destinationChainId);
 
   const send = async (amount: string) => {
     if (!address) throw new Error("Connect wallet first");
-    if (!write.deployment) throw new Error("Missing deployment for MyNativeOFTAdapter on Base Sepolia");
-    if (!publicClient) throw new Error("Missing public client for Base Sepolia");
+    if (!sourceDeployment) throw new Error(`Missing deployment for ${cfg.sourceContractName} on ${cfg.sourceChainId}`);
+    if (!publicClient) throw new Error(`Missing public client for chain ${cfg.sourceChainId}`);
+    if (!destinationOft?.address) throw new Error(`Missing deployment for ${cfg.destinationContractName} on ${cfg.destinationChainId}`);
 
-    const { amountWei, sendParam } = buildBridgeSendParam(amount, address);
+    const { amountWei, sendParam } = buildBridgeSendParam(amount, address, cfg.dstEid);
 
     const quoteRaw = await publicClient.readContract({
-      address: write.deployment.address,
-      abi: write.deployment.abi,
+      address: sourceDeployment.address,
+      abi: sourceDeployment.abi,
       functionName: "quoteSend",
       args: [sendParam, false],
     });
 
     const quote = normalizeQuote(quoteRaw);
-    const value = quote.nativeFee + amountWei;
-    
-    if (!hederaAssetOft?.address) throw new Error("Missing deployment for MyHTSConnector on Hedera");
+    const value = getBridgeTxValue(quote.nativeFee, amountWei, cfg);
 
-    // Send the transaction
-    const txHash = (await write.writeContractAsync("send", [sendParam, quote, address], value)) as `0x${string}`;
+    if (cfg.sourceChainId === HEDERA_CHAIN_ID) {
+      const tokenAddress = (await publicClient.readContract({
+        address: sourceDeployment.address,
+        abi: sourceDeployment.abi,
+        functionName: "token",
+        args: [],
+      })) as unknown as `0x${string}`;
+
+      const allowance = (await publicClient.readContract({
+        address: tokenAddress,
+        abi: ERC20_ALLOWANCE_ABI,
+        functionName: "allowance",
+        args: [address, sourceDeployment.address],
+      })) as bigint;
+
+      if (allowance < amountWei) {
+        const approvalHash = (await write.writeContractAsync({
+          chainId: HEDERA_CHAIN_ID,
+          address: HTS_PRECOMPILE,
+          abi: HTS_PRECOMPILE_ABI,
+          functionName: "approve",
+          args: [tokenAddress, sourceDeployment.address, amountWei],
+          gas: 1_500_000n,
+        } as any)) as `0x${string}`;
+        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+      }
+    }
+
+    const txHash = (await write.writeContractAsync({
+      chainId: cfg.sourceChainId,
+      address: sourceDeployment.address,
+      abi: sourceDeployment.abi,
+      functionName: "send",
+      args: [sendParam, quote, address],
+      value,
+    } as any)) as `0x${string}`;
     
     // Wait for confirmation and get the actual nonce from the receipt
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
     
     // Get endpoint address to find PacketSent event
     const endpointAddress = (await publicClient.readContract({
-      address: write.deployment.address,
-      abi: write.deployment.abi,
+      address: sourceDeployment.address,
+      abi: sourceDeployment.abi,
       functionName: "endpoint",
-    })) as `0x${string}`;
+      args: [],
+    })) as unknown as `0x${string}`;
     
     // Extract nonce from PacketSent event in the receipt
     // The encodedPayload starts with: version (1 byte) + nonce (8 bytes) + srcEid (4 bytes) + ...
@@ -167,17 +266,17 @@ export const useBridgeSend = () => {
     // Fallback: read from chain if event parsing failed
     if (outboundNonce === 0n) {
       const peer = (await publicClient.readContract({
-        address: write.deployment.address,
+        address: sourceDeployment.address,
         abi: OAPP_PEER_ABI,
         functionName: "peers",
-        args: [HEDERA_EID],
+        args: [cfg.dstEid],
       })) as `0x${string}`;
       
       const nonceRaw = await publicClient.readContract({
         address: endpointAddress,
         abi: ENDPOINT_ABI,
         functionName: "outboundNonce",
-        args: [write.deployment.address, HEDERA_EID, peer],
+        args: [sourceDeployment.address, cfg.dstEid, peer],
       });
       outboundNonce = BigInt(nonceRaw);
     }
@@ -186,10 +285,14 @@ export const useBridgeSend = () => {
       txHash,
       outboundNonce,
       sendParam,
-      sourceOftAddress: write.deployment.address as `0x${string}`,
-      destinationOftAddress: hederaAssetOft.address as `0x${string}`,
+      sourceOftAddress: sourceDeployment.address as `0x${string}`,
+      destinationOftAddress: destinationOft.address as `0x${string}`,
+      sourceChainId: cfg.sourceChainId,
+      destinationChainId: cfg.destinationChainId,
+      srcEid: cfg.srcEid,
+      dstEid: cfg.dstEid,
     };
   };
 
-  return { ...write, send };
+  return { ...write, send, deployment: sourceDeployment };
 };

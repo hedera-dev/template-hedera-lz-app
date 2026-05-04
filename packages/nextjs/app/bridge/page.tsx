@@ -28,6 +28,11 @@ type CatchUpStatus = {
   errors: string[];
 };
 
+const BASE_CHAIN_ID = 84532;
+const HEDERA_CHAIN_ID = 296;
+const BASE_EID = 40245;
+const HEDERA_EID = 40285;
+
 export default function BridgePage() {
   const [amount, setAmount] = useState("0.001");
   const [fromChain, setFromChain] = useState<"base" | "hedera">("base");
@@ -57,14 +62,19 @@ export default function BridgePage() {
   });
   const { chainId, address } = useAccount();
   const { switchChainAsync } = useSwitchChain();
-  const isBase = chainId === 84532;
-  const isHedera = chainId === 296;
-  const quote = useBridgeQuote(amount);
-  const bridge = useBridgeSend();
-  const processReceive = useProcessReceive(296);
-  const pendingMessages = usePendingMessages();
+  const sourceChainId = fromChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const destinationChainId = toChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const srcEid = fromChain === "base" ? BASE_EID : HEDERA_EID;
+  const dstEid = toChain === "base" ? BASE_EID : HEDERA_EID;
+  const isSourceChain = chainId === sourceChainId;
+  const isDestinationChain = chainId === destinationChainId;
+  const routeSupported = fromChain !== toChain;
+  const quote = useBridgeQuote(amount, { fromChain, toChain });
+  const bridge = useBridgeSend({ fromChain, toChain });
+  const processReceive = useProcessReceive(destinationChainId as 296 | 84532);
+  const pendingMessages = usePendingMessages({ fromChain, toChain });
   const sourceReceipt = useWaitForTransactionReceipt({
-    chainId: 84532,
+    chainId: sourceChainId,
     hash: submittedTxHash,
     query: { enabled: Boolean(submittedTxHash) },
   });
@@ -76,9 +86,8 @@ export default function BridgePage() {
     }
   })();
   const amountOutEstimate = amountWei;
-  const routeSupported = fromChain === "base" && toChain === "hedera";
-  const estimatedTotal = quote.fee + amountWei;
-  const lzLink = useLayerZeroScanLink(submittedTxHash, 84532);
+  const estimatedTotal = quote.fee + (fromChain === "base" ? amountWei : 0n);
+  const lzLink = useLayerZeroScanLink(submittedTxHash, sourceChainId);
   const processSucceeded = Boolean(processTimeline.commitExecuteHash && processCompleted);
   const hasStartedFlow = Boolean(submittedTxHash || pendingMessage || processTimeline.verifyHash || processTimeline.commitExecuteHash);
   const sourceStepStatus = !submittedTxHash ? "idle" : sourceReceipt.isSuccess ? "success" : sourceReceipt.isError ? "error" : "pending";
@@ -106,9 +115,14 @@ export default function BridgePage() {
 
   useEffect(() => {
     // Clear stale network-gated errors when wallet chain changes.
-    if (isBase) setBridgeError("");
-    if (isHedera) setProcessError("");
-  }, [isBase, isHedera]);
+    if (isSourceChain) setBridgeError("");
+    if (isDestinationChain) setProcessError("");
+  }, [isSourceChain, isDestinationChain]);
+
+  useEffect(() => {
+    setPendingInfo(null);
+    setShowCatchUp(false);
+  }, [fromChain, toChain]);
 
   const onCheckPending = async () => {
     try {
@@ -122,8 +136,8 @@ export default function BridgePage() {
 
   const onCatchUp = async () => {
     if (!pendingInfo || !pendingMessages.srcOftAddress || !pendingMessages.dstOftAddress) return;
-    if (!isHedera) {
-      await switchChainAsync({ chainId: 296 });
+    if (!isDestinationChain) {
+      await switchChainAsync({ chainId: destinationChainId });
       return;
     }
 
@@ -147,10 +161,10 @@ export default function BridgePage() {
 
       try {
         await processReceive.process({
-          sourceChainId: 84532,
-          destinationChainId: 296,
-          srcEid: 40245,
-          dstEid: 40285,
+          sourceChainId,
+          destinationChainId,
+          srcEid,
+          dstEid,
           nonce: msg.nonce,
           amount: msg.amountLD,
           recipient: msg.recipient,
@@ -177,8 +191,8 @@ export default function BridgePage() {
       setBridgeError("Currently only Base Sepolia → Hedera Testnet is supported on this bridge page.");
       return;
     }
-    if (!isBase) {
-      await switchChainAsync({ chainId: 84532 });
+    if (!isSourceChain) {
+      await switchChainAsync({ chainId: sourceChainId });
       return;
     }
     if (!address) {
@@ -205,8 +219,8 @@ export default function BridgePage() {
     setProcessLog("");
     setProcessCompleted(false);
     setProcessInFlight(true);
-    if (!isHedera) {
-      await switchChainAsync({ chainId: 296 });
+    if (!isDestinationChain) {
+      await switchChainAsync({ chainId: destinationChainId });
       setProcessInFlight(false);
       return;
     }
@@ -217,10 +231,10 @@ export default function BridgePage() {
     }
     try {
       const processed = await processReceive.process({
-        sourceChainId: 84532,
-        destinationChainId: 296,
-        srcEid: 40245,
-        dstEid: 40285,
+        sourceChainId,
+        destinationChainId,
+        srcEid,
+        dstEid,
         nonce: pendingMessage.nonce,
         amount: pendingMessage.amount,
         recipient: pendingMessage.recipient,
@@ -241,9 +255,14 @@ export default function BridgePage() {
     }
   };
 
-  const baseTxLink = submittedTxHash ? `https://sepolia.basescan.org/tx/${submittedTxHash}` : "";
-  const verifyLink = processTimeline.verifyHash ? `https://hashscan.io/testnet/tx/${processTimeline.verifyHash}` : "";
-  const commitLink = processTimeline.commitExecuteHash ? `https://hashscan.io/testnet/tx/${processTimeline.commitExecuteHash}` : "";
+  const sourceTxLink = submittedTxHash
+    ? sourceChainId === BASE_CHAIN_ID
+      ? `https://sepolia.basescan.org/tx/${submittedTxHash}`
+      : `https://hashscan.io/testnet/tx/${submittedTxHash}`
+    : "";
+  const destinationTxBase = destinationChainId === BASE_CHAIN_ID ? "https://sepolia.basescan.org/tx/" : "https://hashscan.io/testnet/tx/";
+  const verifyLink = processTimeline.verifyHash ? `${destinationTxBase}${processTimeline.verifyHash}` : "";
+  const commitLink = processTimeline.commitExecuteHash ? `${destinationTxBase}${processTimeline.commitExecuteHash}` : "";
   const composeLink = processTimeline.composeHash ? `https://hashscan.io/testnet/tx/${processTimeline.composeHash}` : "";
 
   return (
@@ -254,7 +273,9 @@ export default function BridgePage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold">Bridge Route</div>
-              <div className="text-xs text-base-content/60">Base Sepolia to Hedera Testnet</div>
+              <div className="text-xs text-base-content/60">
+                {fromChain === "base" ? "Base Sepolia" : "Hedera Testnet"} to {toChain === "base" ? "Base Sepolia" : "Hedera Testnet"}
+              </div>
             </div>
             <div className="badge badge-outline badge-sm">Chapter 1</div>
           </div>
@@ -316,14 +337,14 @@ export default function BridgePage() {
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                 />
-                <span className="text-sm font-medium text-base-content/60">ETH</span>
+                <span className="text-sm font-medium text-base-content/60">{fromChain === "base" ? "ETH" : "WETH-HTS"}</span>
               </div>
             </label>
             <div className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
               <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">Estimated receive</span>
               <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
                 <span className="text-lg font-semibold text-base-content/85">{formatEther(amountOutEstimate)}</span>
-                <span className="text-sm font-medium text-base-content/60">WETH-HTS</span>
+                <span className="text-sm font-medium text-base-content/60">{toChain === "base" ? "ETH" : "WETH-HTS"}</span>
               </div>
             </div>
           </div>
@@ -343,13 +364,19 @@ export default function BridgePage() {
           {quote.updatedAt ? ` - updated ${new Date(quote.updatedAt).toLocaleTimeString()}` : ""}
         </p>
         {!routeSupported ? (
-          <div className="alert alert-warning text-sm">This page currently supports Base Sepolia → Hedera Testnet only.</div>
-        ) : !isBase ? (
-          <div className="alert alert-warning text-sm">Switch to Base Sepolia to submit the source bridge transaction.</div>
+          <div className="alert alert-warning text-sm">Select two different chains for bridging.</div>
+        ) : !isSourceChain ? (
+          <div className="alert alert-warning text-sm">
+            Switch to {fromChain === "base" ? "Base Sepolia" : "Hedera Testnet"} to submit the source bridge transaction.
+          </div>
         ) : null}
         <button className="btn btn-primary" onClick={onSend} disabled={bridge.isPending}>
           {bridge.isPending ? <span className="loading loading-spinner loading-sm" /> : null}
-          {routeSupported ? (isBase ? "Bridge now" : "Switch to Base Sepolia") : "Route not supported yet"}
+          {routeSupported
+            ? isSourceChain
+              ? "Bridge now"
+              : `Switch to ${fromChain === "base" ? "Base Sepolia" : "Hedera Testnet"}`
+            : "Route not supported yet"}
         </button>
         {bridgeError ? <div className="alert alert-error text-sm">{bridgeError}</div> : null}
 
@@ -394,12 +421,14 @@ export default function BridgePage() {
             <div className="font-medium">Phase 1: Source send</div>
             <p className="text-xs font-mono break-all">{submittedTxHash}</p>
             <div className="text-sm">
-              {sourceReceipt.isSuccess ? "Funds locked on Base. Ready to process on Hedera." : "Waiting for Base confirmation..."}
+              {sourceReceipt.isSuccess
+                ? `Funds sent from ${fromChain === "base" ? "Base" : "Hedera"}. Ready to process on ${toChain === "base" ? "Base" : "Hedera"}.`
+                : `Waiting for ${fromChain === "base" ? "Base" : "Hedera"} confirmation...`}
             </div>
             {sourceReceipt.isSuccess ? (
               <div className="flex flex-wrap gap-3 text-sm">
-                <a className="link inline-flex items-center gap-1" href={baseTxLink} target="_blank" rel="noreferrer">
-                  BaseScan <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                <a className="link inline-flex items-center gap-1" href={sourceTxLink} target="_blank" rel="noreferrer">
+                  {fromChain === "base" ? "BaseScan" : "HashScan"} <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
                 </a>
                 {lzLink ? (
                   <a className="link inline-flex items-center gap-1" href={lzLink} target="_blank" rel="noreferrer">
@@ -413,8 +442,12 @@ export default function BridgePage() {
 
         {pendingMessage ? (
           <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
-            <div className="font-medium">Phase 2: Process on Hedera</div>
-            {!isHedera ? <div className="alert alert-warning text-sm">Switch to Hedera Testnet to process message.</div> : null}
+            <div className="font-medium">Phase 2: Process on {toChain === "base" ? "Base" : "Hedera"}</div>
+            {!isDestinationChain ? (
+              <div className="alert alert-warning text-sm">
+                Switch to {toChain === "base" ? "Base Sepolia" : "Hedera Testnet"} to process message.
+              </div>
+            ) : null}
             <button
               className={`btn btn-secondary ${processInFlight ? "btn-disabled opacity-70 cursor-not-allowed" : ""}`}
               onClick={onProcess}
@@ -423,12 +456,12 @@ export default function BridgePage() {
               {processInFlight ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="loading loading-spinner loading-sm" />
-                  Processing on Hedera...
+                  Processing on {toChain === "base" ? "Base" : "Hedera"}...
                 </span>
-              ) : isHedera ? (
-                "Process on Hedera"
+              ) : isDestinationChain ? (
+                `Process on ${toChain === "base" ? "Base" : "Hedera"}`
               ) : (
-                "Switch to Hedera Testnet"
+                `Switch to ${toChain === "base" ? "Base Sepolia" : "Hedera Testnet"}`
               )}
             </button>
             {userFacingProcessError ? (
@@ -437,7 +470,9 @@ export default function BridgePage() {
             {processTimeline.commitExecuteHash ? (
               <>
                 <div className="text-sm">
-                  {processCompleted ? "Complete - WETH-HTS should be received on Hedera." : "Processing on Hedera..."}
+                  {processCompleted
+                    ? `Complete - tokens should be received on ${toChain === "base" ? "Base" : "Hedera"}.`
+                    : `Processing on ${toChain === "base" ? "Base" : "Hedera"}...`}
                 </div>
               </>
             ) : null}
@@ -504,9 +539,9 @@ export default function BridgePage() {
                         ) : null}
                       </div>
 
-                      <button className="btn btn-primary btn-sm w-full" onClick={onCatchUp} disabled={catchUpStatus.isProcessing || !isHedera}>
-                        {!isHedera
-                          ? "Switch to Hedera First"
+                      <button className="btn btn-primary btn-sm w-full" onClick={onCatchUp} disabled={catchUpStatus.isProcessing || !isDestinationChain}>
+                        {!isDestinationChain
+                          ? `Switch to ${toChain === "base" ? "Base" : "Hedera"} First`
                           : catchUpStatus.isProcessing
                             ? `Processing nonce ${catchUpStatus.currentNonce?.toString()} (${catchUpStatus.processedCount}/${catchUpStatus.totalCount})`
                             : `Process All ${pendingInfo.pendingMessages.length} Messages`}
@@ -546,7 +581,7 @@ export default function BridgePage() {
               {submittedTxHash ? (
                 <p>
                   Source send:{" "}
-                  <a className="link font-mono break-all" href={baseTxLink} target="_blank" rel="noreferrer">
+                  <a className="link font-mono break-all" href={sourceTxLink} target="_blank" rel="noreferrer">
                     {submittedTxHash}
                   </a>
                 </p>
