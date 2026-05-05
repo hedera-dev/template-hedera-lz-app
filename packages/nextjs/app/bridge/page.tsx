@@ -4,7 +4,14 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { formatEther, parseEther } from "viem";
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useAccount, useSwitchChain, useWaitForTransactionReceipt } from "wagmi";
-import { useBridgeQuote, useBridgeSend, useLayerZeroScanLink, useProcessReceive, usePendingMessages } from "~~/hooks/lz-app";
+import {
+  useBridgeQuote,
+  useBridgeRelayer,
+  useBridgeSend,
+  useLayerZeroScanLink,
+  usePendingMessages,
+  useProcessReceive,
+} from "~~/hooks/lz-app";
 
 type PendingBridgeMessage = {
   nonce: bigint;
@@ -63,6 +70,22 @@ const LoadingText = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
+const StepDot = ({ status }: { status: string }) => (
+  <span
+    className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+      status === "success"
+        ? "bg-success text-success-content"
+        : status === "error"
+          ? "bg-error text-error-content"
+          : status === "pending"
+            ? "bg-warning text-warning-content"
+            : "bg-base-300 text-base-content/70"
+    }`}
+  >
+    {status === "success" ? "✓" : status === "pending" ? "…" : "•"}
+  </span>
+);
+
 export default function BridgePage() {
   const [amount, setAmount] = useState("0.001");
   const [fromChain, setFromChain] = useState<"base" | "hedera">("base");
@@ -103,6 +126,7 @@ export default function BridgePage() {
   const routeSupported = fromChain !== toChain;
   const quote = useBridgeQuote(amount, { fromChain, toChain });
   const bridge = useBridgeSend({ fromChain, toChain });
+  const relayer = useBridgeRelayer();
   const processReceive = useProcessReceive(destinationChainId as 296 | 84532);
   const pendingMessages = usePendingMessages({ fromChain, toChain });
   const sourceReceipt = useWaitForTransactionReceipt({
@@ -123,7 +147,7 @@ export default function BridgePage() {
   const lzLink = useLayerZeroScanLink(submittedTxHash, sourceChainId);
   const processSucceeded = Boolean(processTimeline.commitExecuteHash && processCompleted);
   /** Source tx is submitted — wallet chain may no longer match source; still treat Phase 1 as started. */
-  const sourceSendSubmitted = Boolean(submittedTxHash);
+  const sourceSendSubmitted = Boolean(submittedTxHash) && !processSucceeded;
   const hasStartedFlow = Boolean(submittedTxHash || pendingMessage || processTimeline.verifyHash || processTimeline.commitExecuteHash);
   const sourceStepStatus = !submittedTxHash ? "idle" : sourceReceipt.isSuccess ? "success" : sourceReceipt.isError ? "error" : "pending";
   const verifyStepStatus = !submittedTxHash
@@ -237,6 +261,9 @@ export default function BridgePage() {
     try {
       const sent = await bridge.send(amount);
       setSubmittedTxHash(sent.txHash);
+      setProcessError("");
+      setProcessLog("");
+      setProcessCompleted(false);
       setPendingMessage({
         nonce: sent.outboundNonce,
         amount,
@@ -244,6 +271,39 @@ export default function BridgePage() {
         srcOftAddress: sent.sourceOftAddress,
         dstOftAddress: sent.destinationOftAddress,
       });
+
+      // Single-signature UX: trigger destination processing via server relayer.
+      setProcessInFlight(true);
+      try {
+        const relayed = await relayer.processBridge({
+          sourceTxHash: sent.txHash,
+          srcEid: sent.srcEid,
+          dstEid: sent.dstEid,
+          nonce: sent.outboundNonce,
+          amount,
+          recipient: address,
+          srcOftAddress: sent.sourceOftAddress,
+          dstOftAddress: sent.destinationOftAddress,
+        });
+        setProcessTimeline({
+          verifyHash: relayed.verifyHash,
+          commitExecuteHash: relayed.commitExecuteHash,
+          composeHash: relayed.composeHash,
+        });
+        setProcessCompleted(true);
+        if (relayed.debug) {
+          setProcessLog(JSON.stringify(relayed.debug, null, 2));
+        }
+        // Destination processing completed; clear manual pending state.
+        setPendingMessage(undefined);
+      } catch (relayerError) {
+        const relayerErrorMessage = relayerError instanceof Error ? relayerError.message : "Unknown relayer error";
+        setProcessError(
+          `Relayer processing failed: ${relayerErrorMessage}. You can retry manually using the fallback processor below.`,
+        );
+      } finally {
+        setProcessInFlight(false);
+      }
     } catch (error) {
       setBridgeError(error instanceof Error ? error.message : "Bridge send failed");
     }
@@ -299,6 +359,18 @@ export default function BridgePage() {
   const verifyLink = processTimeline.verifyHash ? `${destinationTxBase}${processTimeline.verifyHash}` : "";
   const commitLink = processTimeline.commitExecuteHash ? `${destinationTxBase}${processTimeline.commitExecuteHash}` : "";
   const composeLink = processTimeline.composeHash ? `https://hashscan.io/testnet/tx/${processTimeline.composeHash}` : "";
+  const resetBridgeFlow = () => {
+    setSubmittedTxHash(undefined);
+    setProcessTimeline({});
+    setBridgeError("");
+    setProcessError("");
+    setProcessLog("");
+    setProcessCompleted(false);
+    setProcessInFlight(false);
+    setPendingMessage(undefined);
+    setPendingInfo(null);
+    setShowCatchUp(false);
+  };
 
   return (
     <div className="space-y-4">
@@ -423,10 +495,12 @@ export default function BridgePage() {
         <button
           className="btn btn-primary"
           onClick={onSend}
-          disabled={bridge.isPending || sourceSendSubmitted}
+          disabled={bridge.isPending || sourceSendSubmitted || processInFlight}
         >
           {bridge.isPending ? (
             <LoadingText>{fromChain === "hedera" ? "Approving and sending..." : "Sending..."}</LoadingText>
+          ) : processInFlight ? (
+            <LoadingText>Relayer processing destination...</LoadingText>
           ) : sourceSendSubmitted ? (
             `Source transaction submitted (${sourceMeta.shortLabel})`
           ) : routeSupported ? (
@@ -442,44 +516,39 @@ export default function BridgePage() {
         {bridgeError ? <div className="alert alert-error text-sm">{bridgeError}</div> : null}
 
         {hasStartedFlow ? (
-          <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
-            <div className="font-medium">Progress</div>
+          <div className="card bg-base-100 border border-base-300 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">Bridge Progress</div>
+              <StatusBadge status={processSucceeded ? "success" : processInFlight ? "pending" : commitStepStatus} />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-              <div className="border border-base-300 rounded p-2">
-                <div className="font-semibold mb-1">1. Source send</div>
-                <StatusBadge status={sourceStepStatus} />
+              <div className="border border-base-300 rounded p-3 bg-base-200/40 space-y-1">
+                <div className="flex items-center gap-2">
+                  <StepDot status={sourceStepStatus} />
+                  <div className="font-semibold">Source tx submitted</div>
+                </div>
+                <div className="text-base-content/60">User signs once on {sourceMeta.shortLabel}</div>
               </div>
-              <div className="border border-base-300 rounded p-2">
-                <div className="font-semibold mb-1">2. DVN verify</div>
-                <StatusBadge status={verifyStepStatus} />
+              <div className="border border-base-300 rounded p-3 bg-base-200/40 space-y-1">
+                <div className="flex items-center gap-2">
+                  <StepDot status={verifyStepStatus} />
+                  <div className="font-semibold">Relayer verify</div>
+                </div>
+                <div className="text-base-content/60">Mock DVN validation on {destinationMeta.shortLabel}</div>
               </div>
-              <div className="border border-base-300 rounded p-2">
-                <div className="font-semibold mb-1">3. Commit + execute</div>
-                <StatusBadge status={commitStepStatus} />
+              <div className="border border-base-300 rounded p-3 bg-base-200/40 space-y-1">
+                <div className="flex items-center gap-2">
+                  <StepDot status={commitStepStatus} />
+                  <div className="font-semibold">Relayer execute</div>
+                </div>
+                <div className="text-base-content/60">Commit + execute delivery on destination</div>
               </div>
             </div>
-          </div>
-        ) : null}
-
-        {submittedTxHash ? (
-          <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
-            <div className="font-medium">Phase 1: Source send</div>
-            <p className="text-xs font-mono break-all">{submittedTxHash}</p>
-            <div className="text-sm">
-              {sourceReceipt.isSuccess
-                ? `Funds sent from ${sourceMeta.shortLabel}. Ready to process on ${destinationMeta.shortLabel}.`
-                : `Waiting for ${sourceMeta.shortLabel} confirmation...`}
-            </div>
-            {sourceReceipt.isSuccess ? (
-              <div className="flex flex-wrap gap-3 text-sm">
-                <a className="link inline-flex items-center gap-1" href={sourceTxLink} target="_blank" rel="noreferrer">
-                  {sourceMeta.explorerName} <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
-                </a>
-                {lzLink ? (
-                  <a className="link inline-flex items-center gap-1" href={lzLink} target="_blank" rel="noreferrer">
-                    LayerZero Scan <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
-                  </a>
-                ) : null}
+            {processSucceeded ? (
+              <div className="flex justify-end">
+                <button className="btn btn-sm btn-outline" onClick={resetBridgeFlow}>
+                  Start another bridge transfer
+                </button>
               </div>
             ) : null}
           </div>
@@ -487,28 +556,27 @@ export default function BridgePage() {
 
         {pendingMessage ? (
           <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
-            <div className="font-medium">Phase 2: Process on {destinationMeta.shortLabel}</div>
-            {!isDestinationChain ? (
-              <div className="alert alert-warning text-sm">
-                Switch to {destinationMeta.label} to process message.
+            <div className="font-medium">Phase 2: Destination processing ({destinationMeta.shortLabel})</div>
+            {processInFlight ? (
+              <div className="alert alert-info text-sm">
+                <LoadingText>Relayer is processing the destination message in the background...</LoadingText>
               </div>
-            ) : null}
-            <button
-              className={`btn btn-secondary ${processInFlight ? "btn-disabled opacity-70 cursor-not-allowed" : ""}`}
-              onClick={onProcess}
-              disabled={processReceive.isPending || processInFlight}
-            >
-              {processInFlight ? (
-                <span className="inline-flex items-center gap-2">
-                  <span className="loading loading-spinner loading-sm" />
-                  Processing on {destinationMeta.shortLabel}...
-                </span>
-              ) : isDestinationChain ? (
-                `Process on ${destinationMeta.shortLabel}`
-              ) : (
-                `Switch to ${destinationMeta.label}`
-              )}
-            </button>
+            ) : (
+              <>
+                {!isDestinationChain ? (
+                  <div className="alert alert-warning text-sm">
+                    Relayer failed or is unavailable. Switch to {destinationMeta.label} to run manual fallback processing.
+                  </div>
+                ) : null}
+                <button
+                  className="btn btn-secondary"
+                  onClick={onProcess}
+                  disabled={processReceive.isPending}
+                >
+                  {isDestinationChain ? `Manual process on ${destinationMeta.shortLabel}` : `Switch to ${destinationMeta.label}`}
+                </button>
+              </>
+            )}
             {userFacingProcessError ? (
               <div className="alert alert-error text-sm whitespace-pre-wrap break-all">{userFacingProcessError}</div>
             ) : null}
@@ -632,6 +700,14 @@ export default function BridgePage() {
                   Source send ({sourceMeta.explorerName}):{" "}
                   <a className="link font-mono break-all" href={sourceTxLink} target="_blank" rel="noreferrer">
                     {submittedTxHash}
+                  </a>
+                </p>
+              ) : null}
+              {lzLink ? (
+                <p>
+                  LayerZero Scan:{" "}
+                  <a className="link font-mono break-all" href={lzLink} target="_blank" rel="noreferrer">
+                    {lzLink}
                   </a>
                 </p>
               ) : null}

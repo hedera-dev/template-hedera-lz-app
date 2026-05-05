@@ -8,3 +8,4 @@ export * from "./useMockWorkers";
 export * from "./useOftEvents";
 export * from "./useLayerZeroScanLink";
 export * from "./useProcessReceive";
+export * from "./useBridgeRelayer";
