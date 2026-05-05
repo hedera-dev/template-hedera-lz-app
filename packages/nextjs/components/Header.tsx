@@ -20,7 +20,6 @@ type HeaderMenuLink = {
 };
 
 const menuLinks: HeaderMenuLink[] = [
-  { href: "/", label: "Home" },
   { href: "/bridge", label: "Bridge", icon: <ArrowsRightLeftIcon className="h-4 w-4" /> },
   { href: "/vault", label: "Vault", icon: <CircleStackIcon className="h-4 w-4" /> },
   { href: "/strategy", label: "Strategy", icon: <CircleStackIcon className="h-4 w-4" /> },
@@ -75,7 +74,7 @@ export const Header = () => {
             />
           </ul>
         </details>
-        <Link href="/" className="hidden lg:flex items-center gap-3 ml-4 mr-6 shrink-0">
+        <Link href="/bridge" className="hidden lg:flex items-center gap-3 ml-4 mr-6 shrink-0">
           <div className="relative h-9 w-9">
             <Image src="/Hedera-Icon-Dark.svg" alt="Hedera logo" fill className="dark:hidden" priority />
             <Image src="/Hedera-Icon-White.svg" alt="Hedera logo" fill className="hidden dark:block" priority />

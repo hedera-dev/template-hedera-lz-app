@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { formatEther, parseEther } from "viem";
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useAccount, useSwitchChain, useWaitForTransactionReceipt } from "wagmi";
@@ -32,6 +32,36 @@ const BASE_CHAIN_ID = 84532;
 const HEDERA_CHAIN_ID = 296;
 const BASE_EID = 40245;
 const HEDERA_EID = 40285;
+const HEDERA_TINYBAR_TO_WEIBAR = 10_000_000_000n;
+
+const CHAIN_META = {
+  base: { label: "Base Sepolia", shortLabel: "Base", token: "ETH", explorerName: "BaseScan" },
+  hedera: { label: "Hedera Testnet", shortLabel: "Hedera", token: "WETH-HTS", explorerName: "HashScan" },
+} as const;
+
+const StatusBadge = ({ status }: { status: string }) => (
+  <span
+    className={`badge gap-1 ${
+      status === "success"
+        ? "badge-success"
+        : status === "error"
+          ? "badge-error"
+          : status === "pending"
+            ? "badge-warning"
+            : "badge-ghost"
+    }`}
+  >
+    {status === "pending" ? <span className="loading loading-spinner loading-xs" /> : null}
+    {status}
+  </span>
+);
+
+const LoadingText = ({ children }: { children: ReactNode }) => (
+  <span className="inline-flex items-center gap-2">
+    <span className="loading loading-spinner loading-sm" />
+    {children}
+  </span>
+);
 
 export default function BridgePage() {
   const [amount, setAmount] = useState("0.001");
@@ -66,6 +96,8 @@ export default function BridgePage() {
   const destinationChainId = toChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
   const srcEid = fromChain === "base" ? BASE_EID : HEDERA_EID;
   const dstEid = toChain === "base" ? BASE_EID : HEDERA_EID;
+  const sourceMeta = CHAIN_META[fromChain];
+  const destinationMeta = CHAIN_META[toChain];
   const isSourceChain = chainId === sourceChainId;
   const isDestinationChain = chainId === destinationChainId;
   const routeSupported = fromChain !== toChain;
@@ -86,9 +118,12 @@ export default function BridgePage() {
     }
   })();
   const amountOutEstimate = amountWei;
-  const estimatedTotal = quote.fee + (fromChain === "base" ? amountWei : 0n);
+  const contractMsgValue = quote.fee + (fromChain === "base" ? amountWei : 0n);
+  const walletTxValue = fromChain === "hedera" ? contractMsgValue * HEDERA_TINYBAR_TO_WEIBAR : contractMsgValue;
   const lzLink = useLayerZeroScanLink(submittedTxHash, sourceChainId);
   const processSucceeded = Boolean(processTimeline.commitExecuteHash && processCompleted);
+  /** Source tx is submitted — wallet chain may no longer match source; still treat Phase 1 as started. */
+  const sourceSendSubmitted = Boolean(submittedTxHash);
   const hasStartedFlow = Boolean(submittedTxHash || pendingMessage || processTimeline.verifyHash || processTimeline.commitExecuteHash);
   const sourceStepStatus = !submittedTxHash ? "idle" : sourceReceipt.isSuccess ? "success" : sourceReceipt.isError ? "error" : "pending";
   const verifyStepStatus = !submittedTxHash
@@ -188,7 +223,7 @@ export default function BridgePage() {
   const onSend = async () => {
     setBridgeError("");
     if (!routeSupported) {
-      setBridgeError("Currently only Base Sepolia → Hedera Testnet is supported on this bridge page.");
+      setBridgeError("Select two different chains for bridging.");
       return;
     }
     if (!isSourceChain) {
@@ -274,10 +309,10 @@ export default function BridgePage() {
             <div>
               <div className="text-sm font-semibold">Bridge Route</div>
               <div className="text-xs text-base-content/60">
-                {fromChain === "base" ? "Base Sepolia" : "Hedera Testnet"} to {toChain === "base" ? "Base Sepolia" : "Hedera Testnet"}
+                {sourceMeta.label} to {destinationMeta.label}
               </div>
             </div>
-            <div className="badge badge-outline badge-sm">Chapter 1</div>
+            <div className="badge badge-outline badge-sm">OFT Bridge</div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 items-end">
             <label className="form-control">
@@ -330,33 +365,48 @@ export default function BridgePage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
-              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">You send (ETH)</span>
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">You send</span>
               <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
                 <input
                   className="input input-ghost h-10 px-0 text-lg font-semibold focus:outline-none min-w-0"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                 />
-                <span className="text-sm font-medium text-base-content/60">{fromChain === "base" ? "ETH" : "WETH-HTS"}</span>
+                <span className="text-sm font-medium text-base-content/60">{sourceMeta.token}</span>
               </div>
             </label>
             <div className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
               <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">Estimated receive</span>
               <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
                 <span className="text-lg font-semibold text-base-content/85">{formatEther(amountOutEstimate)}</span>
-                <span className="text-sm font-medium text-base-content/60">{toChain === "base" ? "ETH" : "WETH-HTS"}</span>
+                <span className="text-sm font-medium text-base-content/60">{destinationMeta.token}</span>
               </div>
             </div>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
           <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
-            <span className="text-base-content/60">Estimated fee</span>{" "}
-            <span className="font-medium">{quote.fee.toString()} wei</span>
+            <span className="text-base-content/60">LayerZero fee</span>{" "}
+            <span className="font-medium">
+              {quote.isLoading || quote.isFetching ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="loading loading-spinner loading-xs" />
+                  quoting
+                </span>
+              ) : fromChain === "hedera" ? (
+                `${quote.fee.toString()} tinybar`
+              ) : (
+                `${formatEther(quote.fee)} ETH`
+              )}
+            </span>
           </div>
           <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
-            <span className="text-base-content/60">Estimated total msg.value</span>{" "}
-            <span className="font-medium">{formatEther(estimatedTotal)} ETH</span>
+            <span className="text-base-content/60">Wallet transaction value</span>{" "}
+            <span className="font-medium">
+              {quote.isLoading || quote.isFetching
+                ? "..."
+                : `${formatEther(walletTxValue)} ${fromChain === "hedera" ? "HBAR" : "ETH"}`}
+            </span>
           </div>
         </div>
         <p className="text-xs text-base-content/60">
@@ -365,18 +415,29 @@ export default function BridgePage() {
         </p>
         {!routeSupported ? (
           <div className="alert alert-warning text-sm">Select two different chains for bridging.</div>
-        ) : !isSourceChain ? (
+        ) : !isSourceChain && !sourceSendSubmitted ? (
           <div className="alert alert-warning text-sm">
-            Switch to {fromChain === "base" ? "Base Sepolia" : "Hedera Testnet"} to submit the source bridge transaction.
+            Switch to {sourceMeta.label} to submit the source bridge transaction.
           </div>
         ) : null}
-        <button className="btn btn-primary" onClick={onSend} disabled={bridge.isPending}>
-          {bridge.isPending ? <span className="loading loading-spinner loading-sm" /> : null}
-          {routeSupported
-            ? isSourceChain
-              ? "Bridge now"
-              : `Switch to ${fromChain === "base" ? "Base Sepolia" : "Hedera Testnet"}`
-            : "Route not supported yet"}
+        <button
+          className="btn btn-primary"
+          onClick={onSend}
+          disabled={bridge.isPending || sourceSendSubmitted}
+        >
+          {bridge.isPending ? (
+            <LoadingText>{fromChain === "hedera" ? "Approving and sending..." : "Sending..."}</LoadingText>
+          ) : sourceSendSubmitted ? (
+            `Source transaction submitted (${sourceMeta.shortLabel})`
+          ) : routeSupported ? (
+            isSourceChain ? (
+              `Bridge to ${destinationMeta.shortLabel}`
+            ) : (
+              `Switch to ${sourceMeta.label}`
+            )
+          ) : (
+            "Route not supported"
+          )}
         </button>
         {bridgeError ? <div className="alert alert-error text-sm">{bridgeError}</div> : null}
 
@@ -385,32 +446,16 @@ export default function BridgePage() {
             <div className="font-medium">Progress</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
               <div className="border border-base-300 rounded p-2">
-                <div className="font-semibold mb-1">1. Source sent</div>
-                <span
-                  className={`badge ${
-                    sourceStepStatus === "success"
-                      ? "badge-success"
-                      : sourceStepStatus === "error"
-                        ? "badge-error"
-                        : sourceStepStatus === "pending"
-                          ? "badge-warning"
-                          : "badge-ghost"
-                  }`}
-                >
-                  {sourceStepStatus}
-                </span>
+                <div className="font-semibold mb-1">1. Source send</div>
+                <StatusBadge status={sourceStepStatus} />
               </div>
               <div className="border border-base-300 rounded p-2">
                 <div className="font-semibold mb-1">2. DVN verify</div>
-                <span className={`badge ${verifyStepStatus === "success" ? "badge-success" : verifyStepStatus === "pending" ? "badge-warning" : "badge-ghost"}`}>
-                  {verifyStepStatus}
-                </span>
+                <StatusBadge status={verifyStepStatus} />
               </div>
               <div className="border border-base-300 rounded p-2">
-                <div className="font-semibold mb-1">3. Commit execute</div>
-                <span className={`badge ${commitStepStatus === "success" ? "badge-success" : commitStepStatus === "pending" ? "badge-warning" : "badge-ghost"}`}>
-                  {commitStepStatus}
-                </span>
+                <div className="font-semibold mb-1">3. Commit + execute</div>
+                <StatusBadge status={commitStepStatus} />
               </div>
             </div>
           </div>
@@ -422,13 +467,13 @@ export default function BridgePage() {
             <p className="text-xs font-mono break-all">{submittedTxHash}</p>
             <div className="text-sm">
               {sourceReceipt.isSuccess
-                ? `Funds sent from ${fromChain === "base" ? "Base" : "Hedera"}. Ready to process on ${toChain === "base" ? "Base" : "Hedera"}.`
-                : `Waiting for ${fromChain === "base" ? "Base" : "Hedera"} confirmation...`}
+                ? `Funds sent from ${sourceMeta.shortLabel}. Ready to process on ${destinationMeta.shortLabel}.`
+                : `Waiting for ${sourceMeta.shortLabel} confirmation...`}
             </div>
             {sourceReceipt.isSuccess ? (
               <div className="flex flex-wrap gap-3 text-sm">
                 <a className="link inline-flex items-center gap-1" href={sourceTxLink} target="_blank" rel="noreferrer">
-                  {fromChain === "base" ? "BaseScan" : "HashScan"} <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                  {sourceMeta.explorerName} <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
                 </a>
                 {lzLink ? (
                   <a className="link inline-flex items-center gap-1" href={lzLink} target="_blank" rel="noreferrer">
@@ -442,10 +487,10 @@ export default function BridgePage() {
 
         {pendingMessage ? (
           <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
-            <div className="font-medium">Phase 2: Process on {toChain === "base" ? "Base" : "Hedera"}</div>
+            <div className="font-medium">Phase 2: Process on {destinationMeta.shortLabel}</div>
             {!isDestinationChain ? (
               <div className="alert alert-warning text-sm">
-                Switch to {toChain === "base" ? "Base Sepolia" : "Hedera Testnet"} to process message.
+                Switch to {destinationMeta.label} to process message.
               </div>
             ) : null}
             <button
@@ -456,12 +501,12 @@ export default function BridgePage() {
               {processInFlight ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="loading loading-spinner loading-sm" />
-                  Processing on {toChain === "base" ? "Base" : "Hedera"}...
+                  Processing on {destinationMeta.shortLabel}...
                 </span>
               ) : isDestinationChain ? (
-                `Process on ${toChain === "base" ? "Base" : "Hedera"}`
+                `Process on ${destinationMeta.shortLabel}`
               ) : (
-                `Switch to ${toChain === "base" ? "Base Sepolia" : "Hedera Testnet"}`
+                `Switch to ${destinationMeta.label}`
               )}
             </button>
             {userFacingProcessError ? (
@@ -471,8 +516,8 @@ export default function BridgePage() {
               <>
                 <div className="text-sm">
                   {processCompleted
-                    ? `Complete - tokens should be received on ${toChain === "base" ? "Base" : "Hedera"}.`
-                    : `Processing on ${toChain === "base" ? "Base" : "Hedera"}...`}
+                    ? `Complete - tokens should be received on ${destinationMeta.shortLabel}.`
+                    : `Processing on ${destinationMeta.shortLabel}...`}
                 </div>
               </>
             ) : null}
@@ -486,12 +531,12 @@ export default function BridgePage() {
               <div className="flex flex-wrap gap-3 text-sm">
                 {processTimeline.verifyHash ? (
                   <a className="link inline-flex items-center gap-1" href={verifyLink} target="_blank" rel="noreferrer">
-                    HashScan Verify <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                    {destinationMeta.explorerName} Verify <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
                   </a>
                 ) : null}
                 {processTimeline.commitExecuteHash ? (
                   <a className="link inline-flex items-center gap-1" href={commitLink} target="_blank" rel="noreferrer">
-                    HashScan Commit/Execute <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                    {destinationMeta.explorerName} Commit/Execute <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
                   </a>
                 ) : null}
               </div>
@@ -512,7 +557,7 @@ export default function BridgePage() {
                 If you see &quot;Nonce X is ahead of sequence&quot; errors, process pending messages in order.
               </p>
               <button className="btn btn-warning btn-sm" onClick={onCheckPending} disabled={pendingMessages.isLoading}>
-                {pendingMessages.isLoading ? "Checking..." : "Check Pending Messages"}
+                {pendingMessages.isLoading ? <LoadingText>Checking...</LoadingText> : "Check Pending Messages"}
               </button>
 
               {showCatchUp && pendingInfo ? (
@@ -541,9 +586,13 @@ export default function BridgePage() {
 
                       <button className="btn btn-primary btn-sm w-full" onClick={onCatchUp} disabled={catchUpStatus.isProcessing || !isDestinationChain}>
                         {!isDestinationChain
-                          ? `Switch to ${toChain === "base" ? "Base" : "Hedera"} First`
+                          ? `Switch to ${destinationMeta.shortLabel} First`
                           : catchUpStatus.isProcessing
-                            ? `Processing nonce ${catchUpStatus.currentNonce?.toString()} (${catchUpStatus.processedCount}/${catchUpStatus.totalCount})`
+                            ? (
+                                <LoadingText>
+                                  Processing nonce {catchUpStatus.currentNonce?.toString()} ({catchUpStatus.processedCount}/{catchUpStatus.totalCount})
+                                </LoadingText>
+                              )
                             : `Process All ${pendingInfo.pendingMessages.length} Messages`}
                       </button>
 
@@ -580,7 +629,7 @@ export default function BridgePage() {
             <div className="text-xs space-y-1">
               {submittedTxHash ? (
                 <p>
-                  Source send:{" "}
+                  Source send ({sourceMeta.explorerName}):{" "}
                   <a className="link font-mono break-all" href={sourceTxLink} target="_blank" rel="noreferrer">
                     {submittedTxHash}
                   </a>
@@ -588,7 +637,7 @@ export default function BridgePage() {
               ) : null}
               {processTimeline.verifyHash ? (
                 <p>
-                  DVN verify:{" "}
+                  DVN verify ({destinationMeta.explorerName}):{" "}
                   <a className="link font-mono break-all" href={verifyLink} target="_blank" rel="noreferrer">
                     {processTimeline.verifyHash}
                   </a>
@@ -596,7 +645,7 @@ export default function BridgePage() {
               ) : null}
               {processTimeline.commitExecuteHash ? (
                 <p>
-                  Commit + execute:{" "}
+                  Commit + execute ({destinationMeta.explorerName}):{" "}
                   <a className="link font-mono break-all" href={commitLink} target="_blank" rel="noreferrer">
                     {processTimeline.commitExecuteHash}
                   </a>

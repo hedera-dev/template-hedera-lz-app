@@ -53,7 +53,7 @@ export const ScaffoldHbarAppWithProviders = ({ children }: { children: ReactNode
       <QueryClientProvider client={queryClient}>
         <ProgressBar height="3px" color="#2299dd" />
         <RainbowKitProvider avatar={BlockieAvatar} coolMode initialChain={hederaTestnet} theme={rainbowKitTheme}>
-          <div className="min-h-screen bg-base-200">
+          <div className="min-h-screen bg-base-200 flex flex-col">
             <Header />
             <LocalChainErrorBanner />
             <main className="relative flex flex-col flex-1 mx-auto max-w-6xl px-4 py-6 w-full">{children}</main>

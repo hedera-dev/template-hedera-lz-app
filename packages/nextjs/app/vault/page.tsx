@@ -531,11 +531,6 @@ export default function VaultPage() {
         </button>
       </div>
       <div className="card bg-base-200 p-4 space-y-3">
-        <div className="alert alert-info text-sm py-2">
-          Shares / assets from compose are delivered on <strong>Hedera</strong> only (local OFT path). Bridging to Base
-          Sepolia must be a <strong>separate</strong> send from the hub after this flow completes — bundling a remote
-          <code className="mx-1">dstEid</code> inside the same compose hit LayerZero <code className="mx-1">LZ_SendReentrancy</code>.
-        </div>
         <input className="input input-bordered" value={amount} onChange={(e) => setAmount(e.target.value)} />
         <p className="text-sm text-base-content/70">Quote native fee: {quote.nativeFee}</p>
         <p className="text-sm text-base-content/70">Estimated msg.value: {formatEther(estimatedMsgValue)} ETH</p>

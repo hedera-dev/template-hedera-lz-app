@@ -9,6 +9,11 @@ overrides:
   hardhat-deploy: ^0.12.1
   zod: 3.22.4
 
+patchedDependencies:
+  '@walletconnect/modal-core@2.7.0':
+    hash: 2203292f2568b1325ccd411afffd9849c8d384bc0294da6166730d0f779a48b2
+    path: patches/@walletconnect__modal-core@2.7.0.patch
+
 importers:
 
   .:
@@ -12131,7 +12136,7 @@ snapshots:
       '@walletconnect/safe-json': 1.0.2
       pino: 7.11.0
 
-  '@walletconnect/modal-core@2.7.0(@types/react@19.2.14)(react@19.2.5)':
+  '@walletconnect/modal-core@2.7.0(patch_hash=2203292f2568b1325ccd411afffd9849c8d384bc0294da6166730d0f779a48b2)(@types/react@19.2.14)(react@19.2.5)':
     dependencies:
       valtio: 1.11.2(@types/react@19.2.14)(react@19.2.5)
     transitivePeerDependencies:
@@ -12140,7 +12145,7 @@ snapshots:
 
   '@walletconnect/modal-ui@2.7.0(@types/react@19.2.14)(react@19.2.5)':
     dependencies:
-      '@walletconnect/modal-core': 2.7.0(@types/react@19.2.14)(react@19.2.5)
+      '@walletconnect/modal-core': 2.7.0(patch_hash=2203292f2568b1325ccd411afffd9849c8d384bc0294da6166730d0f779a48b2)(@types/react@19.2.14)(react@19.2.5)
       lit: 2.8.0
       motion: 10.16.2
       qrcode: 1.5.3
@@ -12150,7 +12155,7 @@ snapshots:
 
   '@walletconnect/modal@2.7.0(@types/react@19.2.14)(react@19.2.5)':
     dependencies:
-      '@walletconnect/modal-core': 2.7.0(@types/react@19.2.14)(react@19.2.5)
+      '@walletconnect/modal-core': 2.7.0(patch_hash=2203292f2568b1325ccd411afffd9849c8d384bc0294da6166730d0f779a48b2)(@types/react@19.2.14)(react@19.2.5)
       '@walletconnect/modal-ui': 2.7.0(@types/react@19.2.14)(react@19.2.5)
     transitivePeerDependencies:
       - '@types/react'
