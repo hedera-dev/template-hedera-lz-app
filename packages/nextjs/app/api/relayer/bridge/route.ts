@@ -7,7 +7,9 @@ import {
   http,
   keccak256,
   parseEther,
+  parseUnits,
   type Address,
+  type PublicClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { deployedContracts } from "~~/contracts/deployedContracts";
@@ -20,6 +22,13 @@ const HEDERA_EID = 40285;
 const BASE_CHAIN_ID = 84532;
 const HEDERA_CHAIN_ID = 296;
 const HEDERA_GAS_LIMIT = 15_000_000n;
+
+const VERIFICATION_STATE = {
+  Verifying: 0n,
+  Verifiable: 1n,
+  Verified: 2n,
+  NotInitializable: 3n,
+} as const;
 
 const OFT_INFO_ABI = [
   { inputs: [], name: "sharedDecimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
@@ -40,6 +49,29 @@ const ENDPOINT_ABI = [
     ],
     name: "inboundNonce",
     outputs: [{ type: "uint64" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+const EXECUTOR_VIEW_ABI = [
+  {
+    inputs: [{ name: "receiveLib", type: "address" }],
+    name: "receiveLibToView",
+    outputs: [{ name: "receiveLibView", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+const RECEIVE_ULN_VIEW_ABI = [
+  {
+    inputs: [
+      { name: "_packetHeader", type: "bytes" },
+      { name: "_payloadHash", type: "bytes32" },
+    ],
+    name: "verifiable",
+    outputs: [{ name: "state", type: "uint8" }],
     stateMutability: "view",
     type: "function",
   },
@@ -128,6 +160,8 @@ const SIMPLE_EXECUTOR_ABI = [
   },
 ] as const;
 
+type RelayerFlow = "bridge" | "ovault" | "ovault_redeem";
+
 type RelayerBridgeRequest = {
   sourceTxHash: `0x${string}`;
   srcEid: number;
@@ -142,6 +176,8 @@ type RelayerBridgeRequest = {
   composeTo?: Address;
   composeGas?: string;
   composeValue?: string;
+  /** bridge = simple OFT; ovault = Base->Hedera deposit; ovault_redeem = Hedera->Base redeem */
+  flow?: RelayerFlow;
 };
 
 const addressToBytes32 = (address: Address): `0x${string}` => {
@@ -162,7 +198,7 @@ const buildOftMessage = ({
   composeFrom?: Address;
 }) => {
   const toB32 = addressToBytes32(to);
-  const amountSD = parseEther(amount) / 10n ** BigInt(18 - sharedDecimals);
+  const amountSD = parseUnits(amount, sharedDecimals);
 
   if (composeMsg && composeFrom) {
     const composeFromB32 = addressToBytes32(composeFrom);
@@ -189,11 +225,9 @@ const generateGuid = ({
   );
 };
 
-async function waitForReceipt(
-  publicClient: ReturnType<typeof createPublicClient>,
-  hash: `0x${string}`,
-): Promise<void> {
-  // Hedera RPC can fail to decode logs. Fall back to raw receipt status polling.
+type RpcChainId = keyof typeof scaffoldConfig.rpcOverrides;
+
+async function waitForReceipt(publicClient: PublicClient, hash: `0x${string}`): Promise<void> {
   for (let i = 0; i < 40; i++) {
     try {
       const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 15_000 });
@@ -221,6 +255,48 @@ async function waitForReceipt(
   throw new Error(`Timeout waiting for receipt: ${hash}`);
 }
 
+async function waitForVerificationState({
+  publicClient,
+  receiveLibView,
+  packetHeader,
+  payloadHash,
+  attempts = 20,
+  intervalMs = 1500,
+}: {
+  publicClient: PublicClient;
+  receiveLibView: Address;
+  packetHeader: `0x${string}`;
+  payloadHash: `0x${string}`;
+  attempts?: number;
+  intervalMs?: number;
+}) {
+  let lastState: bigint | undefined;
+  for (let i = 0; i < attempts; i++) {
+    const stateRaw = await publicClient.readContract({
+      address: receiveLibView,
+      abi: RECEIVE_ULN_VIEW_ABI,
+      functionName: "verifiable",
+      args: [packetHeader, payloadHash],
+    });
+    lastState = BigInt(stateRaw);
+
+    if (lastState === VERIFICATION_STATE.Verifiable || lastState === VERIFICATION_STATE.Verified) {
+      return lastState;
+    }
+    if (lastState === VERIFICATION_STATE.NotInitializable) {
+      throw new Error(
+        "LayerZero receive state is not initializable. Check nonce ordering before processing this message.",
+      );
+    }
+
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(
+    `LayerZero verification is still pending after ${attempts} checks. Last state: ${lastState?.toString() ?? "unknown"}.`,
+  );
+}
+
 function resolveRouteContracts(srcEid: number, dstEid: number) {
   const srcChainId = srcEid === BASE_EID ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
   const dstChainId = dstEid === BASE_EID ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
@@ -229,9 +305,58 @@ function resolveRouteContracts(srcEid: number, dstEid: number) {
   return { srcChainId, dstChainId, srcName, dstName };
 }
 
+function getAllowedComposerAddresses(): Address[] {
+  const strategy = deployedContracts[HEDERA_CHAIN_ID]?.MyOVaultComposerStrategy?.address;
+  const basic = deployedContracts[HEDERA_CHAIN_ID]?.MyOVaultComposer?.address;
+  const list: Address[] = [];
+  if (strategy) list.push(strategy as Address);
+  if (basic) list.push(basic as Address);
+  return list;
+}
+
+function validateOvaultPayload(body: RelayerBridgeRequest): string | null {
+  if (body.srcEid !== BASE_EID || body.dstEid !== HEDERA_EID) {
+    return "ovault flow only supports Base → Hedera";
+  }
+  const allowedComposers = getAllowedComposerAddresses();
+  if (allowedComposers.length === 0) {
+    return "Missing MyOVaultComposerStrategy / MyOVaultComposer deployment on Hedera";
+  }
+  const recipientOk = allowedComposers.some(c => c.toLowerCase() === body.recipient.toLowerCase());
+  if (!recipientOk) {
+    return "recipient must be a deployed OVault composer on Hedera";
+  }
+  if (!body.composeTo || body.composeTo.toLowerCase() !== body.recipient.toLowerCase()) {
+    return "composeTo must match recipient (composer address)";
+  }
+  if (!body.composeFrom) {
+    return "composeFrom is required for ovault";
+  }
+  if (!body.composeMsg || body.composeMsg === "0x" || body.composeMsg.length <= 2) {
+    return "composeMsg is required for ovault";
+  }
+  return null;
+}
+
+function validateOvaultRedeemPayload(body: RelayerBridgeRequest): string | null {
+  if (body.srcEid !== HEDERA_EID || body.dstEid !== BASE_EID) {
+    return "ovault_redeem flow only supports Hedera → Base";
+  }
+  if (body.composeMsg || body.composeFrom || body.composeTo) {
+    return "ovault_redeem must not include compose payload fields";
+  }
+  return null;
+}
+
+function jsonError(status: number, code: string, message: string) {
+  return NextResponse.json({ status: "failed" as const, code, error: message }, { status });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as RelayerBridgeRequest;
+    const flow: RelayerFlow =
+      body.flow === "ovault" || body.flow === "ovault_redeem" ? body.flow : "bridge";
     const {
       sourceTxHash,
       srcEid,
@@ -249,27 +374,51 @@ export async function POST(request: NextRequest) {
     } = body;
 
     if (!sourceTxHash || !srcEid || !dstEid || !nonce || !amount || !recipient || !srcOftAddress || !dstOftAddress) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return jsonError(400, "missing_fields", "Missing required fields");
     }
     if (srcEid === dstEid) {
-      return NextResponse.json({ error: "Relayer only supports cross-chain routes" }, { status: 400 });
+      return jsonError(400, "unsupported_route", "Relayer only supports cross-chain routes");
     }
     if (!((srcEid === BASE_EID && dstEid === HEDERA_EID) || (srcEid === HEDERA_EID && dstEid === BASE_EID))) {
-      return NextResponse.json({ error: "Unsupported route" }, { status: 400 });
+      return jsonError(400, "unsupported_route", "Unsupported route");
     }
 
-    const maxAmount = parseEther(process.env.RELAYER_MAX_BRIDGE_AMOUNT_ETH ?? "1");
+    const maxBridge = parseEther(process.env.RELAYER_MAX_BRIDGE_AMOUNT_ETH ?? "1");
+    const maxVault = parseEther(
+      process.env.RELAYER_MAX_VAULT_AMOUNT_ETH ?? process.env.RELAYER_MAX_BRIDGE_AMOUNT_ETH ?? "1",
+    );
+    const maxVaultRedeem = parseEther(
+      process.env.RELAYER_MAX_VAULT_REDEEM_AMOUNT_ETH ??
+        process.env.RELAYER_MAX_VAULT_AMOUNT_ETH ??
+        process.env.RELAYER_MAX_BRIDGE_AMOUNT_ETH ??
+        "1",
+    );
+    const maxAmount = flow === "ovault" ? maxVault : flow === "ovault_redeem" ? maxVaultRedeem : maxBridge;
     const amountWei = parseEther(amount);
     if (amountWei <= 0n || amountWei > maxAmount) {
-      return NextResponse.json(
-        { error: `Amount out of bounds. Max is ${(Number(maxAmount) / 1e18).toString()} ETH-equivalent` },
-        { status: 400 },
+      return jsonError(
+        400,
+        "amount_out_of_bounds",
+        `Amount out of bounds. Max is ${(Number(maxAmount) / 1e18).toString()} ETH-equivalent`,
       );
+    }
+
+    if (flow === "ovault") {
+      const ovaultErr = validateOvaultPayload(body);
+      if (ovaultErr) {
+        return jsonError(400, "allowlist_mismatch", ovaultErr);
+      }
+    }
+    if (flow === "ovault_redeem") {
+      const ovaultRedeemErr = validateOvaultRedeemPayload(body);
+      if (ovaultRedeemErr) {
+        return jsonError(400, "allowlist_mismatch", ovaultRedeemErr);
+      }
     }
 
     const privateKeyRaw = process.env.RELAYER_PRIVATE_KEY;
     if (!privateKeyRaw) {
-      return NextResponse.json({ error: "RELAYER_PRIVATE_KEY is not configured" }, { status: 500 });
+      return jsonError(500, "config", "RELAYER_PRIVATE_KEY is not configured");
     }
     const privateKey = (privateKeyRaw.startsWith("0x") ? privateKeyRaw : `0x${privateKeyRaw}`) as `0x${string}`;
     const account = privateKeyToAccount(privateKey);
@@ -278,28 +427,34 @@ export async function POST(request: NextRequest) {
     const expectedSrc = deployedContracts[srcChainId]?.[srcName]?.address;
     const expectedDst = deployedContracts[dstChainId]?.[dstName]?.address;
     if (!expectedSrc || !expectedDst) {
-      return NextResponse.json({ error: "Missing OFT deployments for route" }, { status: 500 });
+      return jsonError(500, "config", "Missing OFT deployments for route");
     }
     if (expectedSrc.toLowerCase() !== srcOftAddress.toLowerCase() || expectedDst.toLowerCase() !== dstOftAddress.toLowerCase()) {
-      return NextResponse.json({ error: "OFT address mismatch (blocked by allowlist)" }, { status: 400 });
+      return jsonError(400, "allowlist_mismatch", "OFT address mismatch (blocked by allowlist)");
     }
 
-    const dvnAddress = deployedContracts[dstChainId]?.SimpleDVNMock?.address as Address | undefined;
-    const executorAddress = deployedContracts[dstChainId]?.SimpleExecutorMock?.address as Address | undefined;
+    const dvnAddress = deployedContracts[dstChainId as keyof typeof deployedContracts]?.SimpleDVNMock?.address as
+      | Address
+      | undefined;
+    const executorAddress = deployedContracts[dstChainId as keyof typeof deployedContracts]?.SimpleExecutorMock
+      ?.address as Address | undefined;
     if (!dvnAddress || !executorAddress) {
-      return NextResponse.json({ error: "Missing mock worker deployments on destination chain" }, { status: 500 });
+      return jsonError(500, "config", "Missing mock worker deployments on destination chain");
     }
 
     const dstChain = dstChainId === HEDERA_CHAIN_ID ? hederaTestnet : baseSepolia;
+    const dstRpc = scaffoldConfig.rpcOverrides[dstChainId as RpcChainId];
     const publicClient = createPublicClient({
       chain: dstChain,
-      transport: http(scaffoldConfig.rpcOverrides[dstChainId]),
+      transport: http(dstRpc),
     });
     const walletClient = createWalletClient({
       account,
       chain: dstChain,
-      transport: http(scaffoldConfig.rpcOverrides[dstChainId]),
+      transport: http(dstRpc),
     });
+    // viem's PublicClient is chain-parameterized; Hedera vs Base clients are not assignable to each other.
+    const destinationPublicClient = publicClient as unknown as PublicClient;
 
     const nonceBigInt = BigInt(nonce);
     const sharedDecimalsRaw = await publicClient.readContract({
@@ -342,11 +497,10 @@ export async function POST(request: NextRequest) {
     });
     const nextNonce = BigInt(currentInboundNonce) + 1n;
     if (nonceBigInt !== nextNonce) {
-      return NextResponse.json(
-        {
-          error: `Nonce mismatch. Expected next nonce ${nextNonce.toString()}, got ${nonceBigInt.toString()}`,
-        },
-        { status: 409 },
+      return jsonError(
+        409,
+        "nonce_mismatch",
+        `Nonce mismatch. Expected next nonce ${nextNonce.toString()}, got ${nonceBigInt.toString()}`,
       );
     }
 
@@ -354,8 +508,18 @@ export async function POST(request: NextRequest) {
       to: recipient,
       amount,
       sharedDecimals,
-      composeMsg,
-      composeFrom,
+      composeMsg:
+        flow === "ovault"
+          ? composeMsg
+          : flow === "bridge" && composeMsg && composeFrom
+            ? composeMsg
+            : undefined,
+      composeFrom:
+        flow === "ovault"
+          ? composeFrom
+          : flow === "bridge" && composeMsg && composeFrom
+            ? composeFrom
+            : undefined,
     });
     const guid = generateGuid({
       nonce: nonceBigInt,
@@ -365,6 +529,12 @@ export async function POST(request: NextRequest) {
       dstOappB32,
     });
 
+    const packetHeader = encodePacked(
+      ["uint8", "uint64", "uint32", "bytes32", "uint32", "bytes32"],
+      [1, nonceBigInt, srcEid, srcOappB32, dstEid, dstOappB32],
+    );
+    const payloadHash = keccak256(encodePacked(["bytes32", "bytes"], [guid, message]));
+
     const verifyHash = await walletClient.writeContract({
       address: dvnAddress,
       abi: SIMPLE_DVN_ABI,
@@ -372,13 +542,30 @@ export async function POST(request: NextRequest) {
       args: [message, nonceBigInt, srcEid, srcOappB32, dstEid, dstOftAddress],
       gas: HEDERA_GAS_LIMIT,
     });
-    await waitForReceipt(publicClient, verifyHash);
+    await waitForReceipt(destinationPublicClient, verifyHash);
 
     const receiveUln = (await publicClient.readContract({
       address: dvnAddress,
       abi: SIMPLE_DVN_ABI,
       functionName: "receiveUln",
     })) as Address;
+
+    const receiveLibView = (await publicClient.readContract({
+      address: executorAddress,
+      abi: EXECUTOR_VIEW_ABI,
+      functionName: "receiveLibToView",
+      args: [receiveUln],
+    })) as Address;
+    if (receiveLibView === "0x0000000000000000000000000000000000000000") {
+      return jsonError(500, "config", "SimpleExecutorMock has no ReceiveUln302View configured for this receive library.");
+    }
+
+    await waitForVerificationState({
+      publicClient: destinationPublicClient,
+      receiveLibView,
+      packetHeader,
+      payloadHash,
+    });
 
     const commitExecuteHash = await walletClient.writeContract({
       address: executorAddress,
@@ -403,11 +590,12 @@ export async function POST(request: NextRequest) {
       ],
       gas: HEDERA_GAS_LIMIT,
     });
-    await waitForReceipt(publicClient, commitExecuteHash);
+    await waitForReceipt(destinationPublicClient, commitExecuteHash);
 
     let composeHash: `0x${string}` | undefined;
+    let composeWarning: string | undefined;
     if (composeMsg && composeFrom && composeTo) {
-      const amountSD = parseEther(amount) / 10n ** BigInt(18 - sharedDecimals);
+      const amountSD = parseUnits(amount, sharedDecimals);
       const amountReceivedLD =
         localDecimals >= sharedDecimals
           ? amountSD * 10n ** BigInt(localDecimals - sharedDecimals)
@@ -417,23 +605,41 @@ export async function POST(request: NextRequest) {
         [nonceBigInt, srcEid, amountReceivedLD, addressToBytes32(composeFrom), composeMsg],
       );
 
-      composeHash = await walletClient.writeContract({
-        address: executorAddress,
-        abi: SIMPLE_EXECUTOR_ABI,
-        functionName: "compose302",
-        args: [
-          dstOftAddress,
-          composeTo,
-          guid,
-          0,
-          composePayload,
-          "0x",
-          composeGas ? BigInt(composeGas) : 12_000_000n,
-        ],
-        value: composeValue ? BigInt(composeValue) : 0n,
-        gas: HEDERA_GAS_LIMIT,
-      });
-      await waitForReceipt(publicClient, composeHash);
+      const MIN_HEDERA_COMPOSE_GAS = 12_000_000n;
+      const requestedGas = composeGas ? BigInt(composeGas) : MIN_HEDERA_COMPOSE_GAS;
+      const effectiveComposeGas = requestedGas > MIN_HEDERA_COMPOSE_GAS ? requestedGas : MIN_HEDERA_COMPOSE_GAS;
+      const composeValueBn = composeValue ? BigInt(composeValue) : 0n;
+
+      const runCompose = async (gas: bigint) => {
+        return walletClient.writeContract({
+          address: executorAddress,
+          abi: SIMPLE_EXECUTOR_ABI,
+          functionName: "compose302",
+          args: [dstOftAddress, composeTo, guid, 0, composePayload, "0x", gas],
+          value: composeValueBn,
+          gas: HEDERA_GAS_LIMIT,
+        });
+      };
+
+      try {
+        composeHash = await runCompose(effectiveComposeGas);
+        await waitForReceipt(destinationPublicClient, composeHash);
+      } catch (firstErr) {
+        const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+        try {
+          const retryGas = 14_000_000n;
+          composeHash = await runCompose(retryGas);
+          await waitForReceipt(destinationPublicClient, composeHash);
+          composeWarning = `compose302 retried with higher gas (${retryGas}). Initial: ${firstMsg}`;
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          return jsonError(
+            500,
+            "compose_failed",
+            `compose302 failed after retry. Initial: ${firstMsg}. Retry: ${retryMsg}`,
+          );
+        }
+      }
     }
 
     return NextResponse.json({
@@ -442,7 +648,9 @@ export async function POST(request: NextRequest) {
       verifyHash,
       commitExecuteHash,
       composeHash,
+      composeWarning,
       debug: {
+        flow,
         srcEid,
         dstEid,
         nonce: nonceBigInt.toString(),
@@ -453,6 +661,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Relayer failed";
-    return NextResponse.json({ status: "failed", error: message }, { status: 500 });
+    return NextResponse.json({ status: "failed" as const, code: "relayer_error", error: message }, { status: 500 });
   }
 }

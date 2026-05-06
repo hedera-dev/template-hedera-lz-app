@@ -5,13 +5,24 @@ import { encodeFunctionData, formatEther, formatUnits, parseAbiItem, parseEther 
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useAccount, usePublicClient, useSwitchChain, useWaitForTransactionReceipt } from "wagmi";
 import { deployedContracts } from "~~/contracts/deployedContracts";
-import { useLayerZeroScanLink, useOvaultQuote, useOvaultSend, useProcessReceive } from "~~/hooks/lz-app";
-import { buildOvaultSendParam, addressToBytes32 } from "~~/hooks/lz-app/ovaultSendParam";
+import {
+  RelayerRequestError,
+  useBridgeRelayer,
+  useLayerZeroScanLink,
+  useOvaultQuote,
+  useOvaultSend,
+  useProcessReceive,
+} from "~~/hooks/lz-app";
+import { buildOvaultSendParam, addressToBytes32, type RedeemMode } from "~~/hooks/lz-app/ovaultSendParam";
 import { generateGuid } from "~~/hooks/lz-app/utils/messageEncoding";
 import { useDeployedContractInfo } from "~~/hooks/scaffold-hbar";
 
 type PendingVaultMessage = {
   nonce: bigint;
+  srcEid: number;
+  dstEid: number;
+  sourceChainId: 84532 | 296;
+  destinationChainId: 84532 | 296;
   amount: string;
   recipient: `0x${string}`;
   srcOftAddress: `0x${string}`;
@@ -70,6 +81,7 @@ const OFT_SENT_EVENT = parseAbiItem(
 
 export default function VaultPage() {
   const [mode, setMode] = useState<"deposit" | "redeem">("deposit");
+  const [redeemMode, setRedeemMode] = useState<RedeemMode>("local");
   const [amount, setAmount] = useState("0.0005");
   const [submittedTxHash, setSubmittedTxHash] = useState<`0x${string}` | undefined>();
   const [processTimeline, setProcessTimeline] = useState<ProcessTimeline>({});
@@ -86,6 +98,9 @@ export default function VaultPage() {
     errors: [],
   });
   const [pendingMessage, setPendingMessage] = useState<PendingVaultMessage | undefined>();
+  const [relayerProcessing, setRelayerProcessing] = useState(false);
+  const [relayerError, setRelayerError] = useState("");
+  const relayer = useBridgeRelayer();
   const baseClient = usePublicClient({ chainId: BASE_CHAIN_ID });
   const hederaClient = usePublicClient({ chainId: HEDERA_CHAIN_ID });
   const sourceOft = useDeployedContractInfo(mode === "deposit" ? "MyNativeOFTAdapter" : "MyShareOFT", BASE_CHAIN_ID);
@@ -99,9 +114,13 @@ export default function VaultPage() {
   const isHedera = chainId === 296;
   const sourceChainId = mode === "deposit" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
   const isOnSourceChain = mode === "deposit" ? isBase : isHedera;
-  const quote = useOvaultQuote({ amount, side: mode });
-  const tx = useOvaultSend(mode);
-  const processReceive = useProcessReceive(296);
+  const quote = useOvaultQuote({ amount, side: mode, redeemMode });
+  const tx = useOvaultSend(mode, redeemMode);
+  const processReceiveHedera = useProcessReceive(296);
+  const processReceiveBase = useProcessReceive(84532);
+  const processReceive = pendingMessage?.destinationChainId === BASE_CHAIN_ID ? processReceiveBase : processReceiveHedera;
+  const processingChainId = pendingMessage?.destinationChainId ?? HEDERA_CHAIN_ID;
+  const isOnProcessingChain = chainId === processingChainId;
   const lzLink = useLayerZeroScanLink(submittedTxHash, sourceChainId === BASE_CHAIN_ID ? BASE_CHAIN_ID : HEDERA_CHAIN_ID);
   const sourceTxLink = submittedTxHash
     ? sourceChainId === BASE_CHAIN_ID
@@ -153,6 +172,9 @@ export default function VaultPage() {
   const onSubmit = async () => {
     setSubmitError("");
     setProcessError("");
+    setRelayerError("");
+    setProcessLog("");
+    setProcessTimeline({});
     if (!isOnSourceChain) {
       await switchChainAsync({ chainId: sourceChainId });
       return;
@@ -168,11 +190,15 @@ export default function VaultPage() {
       if (!sent.destinationOftAddress) {
         throw new Error("Missing destination OFT deployment for processing");
       }
-      setPendingMessage({
+      const pending: PendingVaultMessage = {
         nonce: sent.outboundNonce,
+        srcEid: sent.srcEid,
+        dstEid: sent.dstEid,
+        sourceChainId: sent.srcEid === BASE_EID ? BASE_CHAIN_ID : HEDERA_CHAIN_ID,
+        destinationChainId: sent.dstEid === BASE_EID ? BASE_CHAIN_ID : HEDERA_CHAIN_ID,
         amount,
         // First-hop OFT message must target the composer contract (not the end user wallet).
-        recipient: sent.composeTo as `0x${string}`,
+        recipient: (sent.composeTo ?? userAddress ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
         srcOftAddress: sent.sourceOftAddress,
         dstOftAddress: sent.destinationOftAddress,
         composeMsg: sent.composeMsg,
@@ -180,7 +206,62 @@ export default function VaultPage() {
         composeTo: sent.composeTo,
         composeGas: sent.composeGas,
         composeValue: sent.composeValue,
-      });
+      };
+      setPendingMessage(pending);
+
+      setRelayerProcessing(true);
+      setRelayerError("");
+      try {
+        const sourceClient = pending.sourceChainId === BASE_CHAIN_ID ? baseClient : hederaClient;
+        if (!sourceClient) {
+          throw new Error("Missing source RPC client");
+        }
+        const sourceReceipt = await sourceClient.waitForTransactionReceipt({ hash: sent.txHash });
+        if (sourceReceipt.status !== "success") {
+          throw new Error("Source transaction reverted");
+        }
+        if (!("srcEid" in sent) || !("dstEid" in sent) || !sent.relayerFlow) {
+          throw new Error("Relayer metadata missing from send hook (srcEid/dstEid/relayerFlow)");
+        }
+        const result = await relayer.processBridge({
+          flow: sent.relayerFlow,
+          sourceTxHash: sent.txHash,
+          srcEid: sent.srcEid,
+          dstEid: sent.dstEid,
+          nonce: sent.outboundNonce,
+          amount,
+          recipient: pending.recipient,
+          srcOftAddress: pending.srcOftAddress,
+          dstOftAddress: pending.dstOftAddress,
+          composeMsg: pending.composeMsg,
+          composeFrom: pending.composeFrom,
+          composeTo: pending.composeTo,
+          composeGas: pending.composeGas,
+          composeValue: pending.composeValue,
+        });
+        setProcessTimeline({
+          verifyHash: result.verifyHash,
+          commitExecuteHash: result.commitExecuteHash,
+          composeHash: result.composeHash,
+        });
+        setProcessLog(
+          JSON.stringify({ ...(result.debug ?? {}), composeWarning: result.composeWarning, relayer: true }, null, 2),
+        );
+        if (result.composeWarning) {
+          setProcessError(result.composeWarning);
+        } else {
+          setProcessError("");
+        }
+        setPendingMessage(undefined);
+      } catch (err) {
+        const relayerErr = err instanceof RelayerRequestError ? err : null;
+        const code = relayerErr?.code;
+        const prefix = code ? `[${code}] ` : "";
+        setRelayerError(prefix + (err instanceof Error ? err.message : "Relayer failed"));
+        setProcessTimeline({});
+      } finally {
+        setRelayerProcessing(false);
+      }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Transaction failed to submit");
     }
@@ -189,8 +270,9 @@ export default function VaultPage() {
   const onProcess = async () => {
     setProcessError("");
     setProcessLog("");
-    if (!isHedera) {
-      await switchChainAsync({ chainId: 296 });
+    setRelayerError("");
+    if (!isOnProcessingChain) {
+      await switchChainAsync({ chainId: processingChainId });
       return;
     }
     if (!pendingMessage) {
@@ -198,7 +280,7 @@ export default function VaultPage() {
       return;
     }
     try {
-      const resolvedDstOft = getDestinationOftAddress();
+      const resolvedDstOft = pendingMessage.dstOftAddress;
       if (!resolvedDstOft) {
         setProcessError("Missing destination OFT deployment");
         return;
@@ -206,7 +288,7 @@ export default function VaultPage() {
       const nextNonce = await processReceive.getNextNonce(
         pendingMessage.srcOftAddress,
         resolvedDstOft,
-        40245,
+        pendingMessage.srcEid,
       );
       setNextExpectedNonce(nextNonce);
       if (pendingMessage.nonce > nextNonce) {
@@ -218,10 +300,10 @@ export default function VaultPage() {
       }
 
       const processed = await processReceive.process({
-        sourceChainId: 84532,
-        destinationChainId: 296,
-        srcEid: 40245,
-        dstEid: 40285,
+        sourceChainId: pendingMessage.sourceChainId,
+        destinationChainId: pendingMessage.destinationChainId,
+        srcEid: pendingMessage.srcEid,
+        dstEid: pendingMessage.dstEid,
         nonce: pendingMessage.nonce,
         amount: pendingMessage.amount,
         recipient: pendingMessage.recipient,
@@ -241,7 +323,8 @@ export default function VaultPage() {
       if (processed.debug?.composeWarning) {
         setProcessError(processed.debug.composeWarning);
       }
-      setProcessLog(JSON.stringify(processed.debug, null, 2));
+      setProcessLog(JSON.stringify({ ...processed.debug, relayer: false }, null, 2));
+      setPendingMessage(undefined);
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Processing failed";
       if (raw.includes("compose302")) {
@@ -260,7 +343,7 @@ export default function VaultPage() {
     if (!pendingMessage) return;
     setCheckingNonce(true);
     try {
-      const resolvedDstOft = getDestinationOftAddress();
+      const resolvedDstOft = pendingMessage.dstOftAddress;
       if (!resolvedDstOft) {
         setProcessError("Missing destination OFT deployment");
         return;
@@ -268,7 +351,7 @@ export default function VaultPage() {
       const nextNonce = await processReceive.getNextNonce(
         pendingMessage.srcOftAddress,
         resolvedDstOft,
-        40245,
+        pendingMessage.srcEid,
       );
       setNextExpectedNonce(nextNonce);
     } catch (err) {
@@ -355,6 +438,10 @@ export default function VaultPage() {
 
       messages.push({
         nonce,
+        srcEid: BASE_EID,
+        dstEid: HEDERA_EID,
+        sourceChainId: BASE_CHAIN_ID,
+        destinationChainId: HEDERA_CHAIN_ID,
         amount: amountStr,
         recipient: composerDeployment.address as `0x${string}`,
         srcOftAddress: sourceOft.address as `0x${string}`,
@@ -530,6 +617,19 @@ export default function VaultPage() {
           Redeem
         </button>
       </div>
+      {mode === "redeem" ? (
+        <div className="tabs tabs-boxed">
+          <button className={`tab ${redeemMode === "local" ? "tab-active" : ""}`} onClick={() => setRedeemMode("local")}>
+            Local (Hedera)
+          </button>
+          <button
+            className={`tab ${redeemMode === "crossChainToBase" ? "tab-active" : ""}`}
+            onClick={() => setRedeemMode("crossChainToBase")}
+          >
+            Cross-chain (Base ETH)
+          </button>
+        </div>
+      ) : null}
       <div className="card bg-base-200 p-4 space-y-3">
         <input className="input input-bordered" value={amount} onChange={(e) => setAmount(e.target.value)} />
         <p className="text-sm text-base-content/70">Quote native fee: {quote.nativeFee}</p>
@@ -544,13 +644,23 @@ export default function VaultPage() {
             Switch to {mode === "deposit" ? "Base Sepolia" : "Hedera Testnet"} to {mode}.
           </div>
         ) : null}
-        <button className="btn btn-primary" onClick={onSubmit} disabled={tx.isPending || receipt.isLoading}>
-          {tx.isPending || receipt.isLoading ? (
+        <button className="btn btn-primary" onClick={onSubmit} disabled={tx.isPending || receipt.isLoading || relayerProcessing}>
+          {tx.isPending || receipt.isLoading || relayerProcessing ? (
             <span className="loading loading-spinner loading-sm" />
           ) : null}
-          {isOnSourceChain ? `Submit ${mode}` : `Switch to ${mode === "deposit" ? "Base Sepolia" : "Hedera Testnet"}`}
+          {relayerProcessing
+            ? `Relayer finishing on ${pendingMessage?.destinationChainId === BASE_CHAIN_ID ? "Base" : "Hedera"}…`
+            : isOnSourceChain
+              ? `Submit ${mode}`
+              : `Switch to ${mode === "deposit" ? "Base Sepolia" : "Hedera Testnet"}`}
         </button>
         {submitError ? <div className="alert alert-error text-sm">{submitError}</div> : null}
+        {relayerProcessing ? (
+          <div className="alert alert-info text-sm">
+            Backend relayer is running destination mock-worker steps (verify → commit/execute → compose302 when needed).
+            No second wallet signature is required if this succeeds.
+          </div>
+        ) : null}
 
         {submittedTxHash ? (
           <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
@@ -571,7 +681,9 @@ export default function VaultPage() {
               <div className="text-sm text-success">
                 {mode === "deposit"
                   ? "Funds locked on Base. Ready for Hedera processing."
-                  : "Redeem/divest submitted on Hedera. No worker processing is required."}
+                  : redeemMode === "crossChainToBase"
+                    ? "Redeem submitted on Hedera. Waiting for Base receive processing."
+                    : "Redeem/divest submitted on Hedera. No worker processing is required."}
               </div>
             )}
             <div className="flex flex-wrap gap-3 text-sm">
@@ -592,7 +704,21 @@ export default function VaultPage() {
 
         {pendingMessage ? (
           <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
-            <div className="font-medium">Phase 2: Process on Hedera</div>
+            {relayerError ? (
+              <div className="alert alert-warning text-sm space-y-1">
+                <div className="font-semibold">Relayer did not complete automatically</div>
+                <div className="whitespace-pre-wrap break-all">{relayerError}</div>
+                <div className="text-xs opacity-80">
+                  Use manual processing below (same as before) or fix <code className="bg-base-300 px-1">RELAYER_PRIVATE_KEY</code>{" "}
+                  / DVN ownership — see README.
+                </div>
+              </div>
+            ) : null}
+            <div className="font-medium">
+              {relayerError
+                ? `Phase 2 (fallback): Process on ${processingChainId === BASE_CHAIN_ID ? "Base" : "Hedera"} with your wallet`
+                : `Phase 2: Process on ${processingChainId === BASE_CHAIN_ID ? "Base" : "Hedera"}`}
+            </div>
             <div className="bg-base-200 border border-base-300 rounded p-2 text-xs space-y-1">
               <div className="flex items-center justify-between gap-3">
                 <span>Message nonce: {pendingMessage.nonce.toString()}</span>
@@ -609,12 +735,18 @@ export default function VaultPage() {
                 </div>
               ) : null}
             </div>
-            {!isHedera ? <div className="alert alert-warning text-sm">Switch to Hedera Testnet to process this message.</div> : null}
+            {!isOnProcessingChain ? (
+              <div className="alert alert-warning text-sm">
+                Switch to {processingChainId === BASE_CHAIN_ID ? "Base Sepolia" : "Hedera Testnet"} to process this message.
+              </div>
+            ) : null}
             <button className="btn btn-secondary" onClick={onProcess} disabled={processReceive.isPending}>
-              {isHedera ? "Process on Hedera" : "Switch to Hedera Testnet"}
+              {isOnProcessingChain
+                ? `Process on ${processingChainId === BASE_CHAIN_ID ? "Base" : "Hedera"}`
+                : `Switch to ${processingChainId === BASE_CHAIN_ID ? "Base Sepolia" : "Hedera Testnet"}`}
             </button>
             {processError ? <div className="alert alert-error text-sm whitespace-pre-wrap break-all">{processError}</div> : null}
-            {processError.includes("Nonce gap detected") ? (
+            {mode === "deposit" && processError?.includes("Nonce gap detected") ? (
               <div className="space-y-2">
                 <div className="text-xs text-base-content/70">
                   Process pending vault nonces automatically, or use <a className="link" href="/mock-workers">Workers</a> manually.
@@ -671,7 +803,11 @@ export default function VaultPage() {
             <div className="text-xs space-y-1">
               {submittedTxHash ? (
                 <p>
-                  {mode === "deposit" ? "Source send" : "Local redeem/divest"}:{" "}
+                  {mode === "deposit"
+                    ? "Source send"
+                    : redeemMode === "crossChainToBase"
+                      ? "Redeem + send (Hedera -> Base)"
+                      : "Local redeem/divest"}:{" "}
                   <a className="link font-mono break-all" href={sourceTxLink} target="_blank" rel="noreferrer">
                     {submittedTxHash}
                   </a>

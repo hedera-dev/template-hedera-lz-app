@@ -2,7 +2,15 @@
 
 import { useAccount, usePublicClient } from "wagmi";
 import { encodeFunctionData, parseEther } from "viem";
-import { addressToBytes32, buildOvaultSendParam, HEDERA_EID, normalizeQuote, Side } from "./ovaultSendParam";
+import {
+  BASE_EID,
+  buildRedeemSendParam,
+  buildOvaultSendParam,
+  HEDERA_EID,
+  normalizeQuote,
+  RedeemMode,
+  Side,
+} from "./ovaultSendParam";
 import { useDeployedContractInfo, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
 
 const BASE_CHAIN_ID = 84532;
@@ -34,6 +42,9 @@ const COMPOSER_OFTS_ABI = [
   { inputs: [], name: "ASSET_OFT", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "SHARE_OFT", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
 ] as const;
+const OFT_INFO_ABI = [
+  { inputs: [], name: "endpoint", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+] as const;
 const ERC20_ALLOWANCE_APPROVE_ABI = [
   {
     inputs: [
@@ -57,7 +68,7 @@ const ERC20_ALLOWANCE_APPROVE_ABI = [
   },
 ] as const;
 
-export const useOvaultSend = (side: Side) => {
+export const useOvaultSend = (side: Side, redeemMode: RedeemMode = "local") => {
   const { address } = useAccount();
   const baseClient = usePublicClient({ chainId: BASE_CHAIN_ID });
   const hederaClient = usePublicClient({ chainId: HEDERA_CHAIN_ID });
@@ -69,6 +80,7 @@ export const useOvaultSend = (side: Side) => {
   const composerDeployment = useDeployedContractInfo("MyOVaultComposerStrategy", HEDERA_CHAIN_ID);
   const shareOftHub = useDeployedContractInfo("MyShareOFTAdapterStrategy", HEDERA_CHAIN_ID);
   const assetOftHub = useDeployedContractInfo("MyHTSConnector", HEDERA_CHAIN_ID);
+  const nativeOftBase = useDeployedContractInfo("MyNativeOFTAdapter", BASE_CHAIN_ID);
 
   const send = async (amount: string) => {
     if (!address) throw new Error("Connect wallet first");
@@ -77,6 +89,10 @@ export const useOvaultSend = (side: Side) => {
 
     if (side === "redeem") {
       if (!assetOftHub?.address) throw new Error("Missing hub asset OFT deployment");
+      if (!shareOftHub?.address) throw new Error("Missing hub share OFT deployment");
+      if (redeemMode === "crossChainToBase" && !nativeOftBase?.address) {
+        throw new Error("Missing Base native OFT deployment");
+      }
 
       const shareAmount = parseEther(amount || "0");
       const previewRaw = await hederaClient.readContract({
@@ -86,15 +102,12 @@ export const useOvaultSend = (side: Side) => {
         args: [shareAmount],
       });
       const expectedAssets = previewRaw as unknown as bigint;
-      const sendParam = {
-        dstEid: HEDERA_EID,
-        to: addressToBytes32(address),
-        amountLD: expectedAssets,
+      const redeemDstEid = redeemMode === "crossChainToBase" ? BASE_EID : HEDERA_EID;
+      const sendParam = buildRedeemSendParam({
+        receiverAddress: address,
+        dstEid: redeemDstEid,
         minAmountLD: expectedAssets,
-        extraOptions: "0x" as `0x${string}`,
-        composeMsg: "0x" as `0x${string}`,
-        oftCmd: "0x" as `0x${string}`,
-      };
+      });
 
       const allowance = (await hederaClient.readContract({
         address: vaultDeployment.address,
@@ -112,24 +125,64 @@ export const useOvaultSend = (side: Side) => {
         await hederaClient.waitForTransactionReceipt({ hash: approveHash });
       }
 
+      let redeemMsgValue = 0n;
+      if (redeemMode === "crossChainToBase") {
+        const quoteRaw = await hederaClient.readContract({
+          address: composerDeployment.address,
+          abi: composerDeployment.abi,
+          functionName: "quoteSend",
+          args: [address, assetOftHub.address as `0x${string}`, shareAmount, sendParam],
+        });
+        redeemMsgValue = normalizeQuote(quoteRaw).nativeFee;
+      }
+
       const txHash = (await composerWrite.writeContractAsync(
         "redeemAndSend",
         [shareAmount, sendParam, address],
-        { value: 0n, gas: HEDERA_GAS_LIMIT },
+        {
+          value: redeemMsgValue,
+          gas: HEDERA_GAS_LIMIT,
+        },
       )) as `0x${string}`;
+
+      const endpointAddress = (await hederaClient.readContract({
+        address: assetOftHub.address as `0x${string}`,
+        abi: OFT_INFO_ABI,
+        functionName: "endpoint",
+        args: [],
+      })) as unknown as `0x${string}`;
+      const peer = (await hederaClient.readContract({
+        address: assetOftHub.address as `0x${string}`,
+        abi: OAPP_PEER_ABI,
+        functionName: "peers",
+        args: [redeemDstEid],
+      })) as `0x${string}`;
+      const nonceRaw = await hederaClient.readContract({
+        address: endpointAddress,
+        abi: ENDPOINT_ABI,
+        functionName: "outboundNonce",
+        args: [assetOftHub.address as `0x${string}`, redeemDstEid, peer],
+      });
+      const outboundNonce = BigInt(nonceRaw) + 1n;
 
       return {
         txHash,
-        outboundNonce: 0n,
+        outboundNonce,
         sendParam,
-        sourceOftAddress: shareOftHub?.address ?? (vaultDeployment.address as `0x${string}`),
-        destinationOftAddress: assetOftHub.address as `0x${string}`,
+        sourceOftAddress: assetOftHub.address as `0x${string}`,
+        destinationOftAddress:
+          redeemMode === "crossChainToBase"
+            ? (nativeOftBase!.address as `0x${string}`)
+            : (assetOftHub.address as `0x${string}`),
         composeMsg: undefined,
-        composeFrom: address,
-        composeTo: composerDeployment.address as `0x${string}`,
+        composeFrom: undefined,
+        composeTo: undefined,
         composeGas: 0n,
         composeValue: 0n,
-        needsProcessing: false,
+        needsProcessing: redeemMode === "crossChainToBase",
+        srcEid: HEDERA_EID,
+        dstEid: redeemDstEid,
+        relayerFlow: redeemMode === "crossChainToBase" ? ("ovault_redeem" as const) : undefined,
       };
     }
 
@@ -217,6 +270,10 @@ export const useOvaultSend = (side: Side) => {
       composeGas: BigInt(composeGas),
       composeValue: composeValue,
       needsProcessing: true,
+      /** LayerZero route + flow tag for `/api/relayer/bridge` (Base → Hedera vault deposit). */
+      srcEid: BASE_EID,
+      dstEid: HEDERA_EID,
+      relayerFlow: "ovault" as const,
     };
   };
 

@@ -4,6 +4,7 @@ import { Options } from "@layerzerolabs/lz-v2-utilities";
 import { encodeAbiParameters, encodeFunctionData, parseEther, PublicClient } from "viem";
 
 export type Side = "deposit" | "redeem";
+export type RedeemMode = "local" | "crossChainToBase";
 
 export const BASE_EID = 40245;
 export const HEDERA_EID = 40285;
@@ -203,4 +204,25 @@ export const buildOvaultSendParam = async ({
   };
 
   return { amountWei, sendParam, composeValue, composeGas };
+};
+
+export const buildRedeemSendParam = ({
+  receiverAddress,
+  dstEid,
+  minAmountLD,
+}: {
+  receiverAddress: `0x${string}`;
+  dstEid: number;
+  minAmountLD: bigint;
+}) => {
+  const extraOptions = Options.newOptions().addExecutorLzReceiveOption(100000, 0).toHex() as `0x${string}`;
+  return {
+    dstEid,
+    to: addressToBytes32(receiverAddress),
+    amountLD: 0n,
+    minAmountLD,
+    extraOptions,
+    composeMsg: "0x" as `0x${string}`,
+    oftCmd: "0x" as `0x${string}`,
+  };
 };

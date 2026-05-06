@@ -1,6 +1,8 @@
 "use client";
 
-type BridgeRelayerRequest = {
+export type RelayerFlow = "bridge" | "ovault" | "ovault_redeem";
+
+export type BridgeRelayerRequest = {
   sourceTxHash: `0x${string}`;
   srcEid: number;
   dstEid: number;
@@ -14,6 +16,7 @@ type BridgeRelayerRequest = {
   composeTo?: `0x${string}`;
   composeGas?: bigint;
   composeValue?: bigint;
+  flow?: RelayerFlow;
 };
 
 export type BridgeRelayerResult = {
@@ -22,9 +25,23 @@ export type BridgeRelayerResult = {
   verifyHash?: `0x${string}`;
   commitExecuteHash?: `0x${string}`;
   composeHash?: `0x${string}`;
+  composeWarning?: string;
+  code?: string;
   error?: string;
   debug?: Record<string, unknown>;
 };
+
+export class RelayerRequestError extends Error {
+  readonly code?: string;
+  readonly httpStatus?: number;
+
+  constructor(message: string, opts?: { code?: string; httpStatus?: number }) {
+    super(message);
+    this.name = "RelayerRequestError";
+    this.code = opts?.code;
+    this.httpStatus = opts?.httpStatus;
+  }
+}
 
 export const useBridgeRelayer = () => {
   const processBridge = async (request: BridgeRelayerRequest): Promise<BridgeRelayerResult> => {
@@ -33,6 +50,7 @@ export const useBridgeRelayer = () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...request,
+        flow: request.flow ?? "bridge",
         nonce: request.nonce.toString(),
         composeGas: request.composeGas?.toString(),
         composeValue: request.composeValue?.toString(),
@@ -41,7 +59,10 @@ export const useBridgeRelayer = () => {
 
     const result = (await response.json()) as BridgeRelayerResult;
     if (!response.ok || result.status === "failed") {
-      throw new Error(result.error || "Relayer bridge processing failed");
+      throw new RelayerRequestError(result.error || "Relayer bridge processing failed", {
+        code: result.code,
+        httpStatus: response.status,
+      });
     }
     return result;
   };

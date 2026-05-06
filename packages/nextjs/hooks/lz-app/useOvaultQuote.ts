@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { parseEther } from "viem";
 import { useAccount, usePublicClient } from "wagmi";
-import { buildOvaultSendParam, normalizeQuote, Side } from "./ovaultSendParam";
+import { buildRedeemSendParam, buildOvaultSendParam, normalizeQuote, RedeemMode, Side, BASE_EID } from "./ovaultSendParam";
 import { useDeployedContractInfo } from "~~/hooks/scaffold-hbar";
 
 const BASE_CHAIN_ID = 84532;
@@ -10,9 +11,11 @@ const BASE_CHAIN_ID = 84532;
 export const useOvaultQuote = ({
   amount,
   side,
+  redeemMode = "local",
 }: {
   amount: string;
   side: Side;
+  redeemMode?: RedeemMode;
 }) => {
   const { address } = useAccount();
   const baseClient = usePublicClient({ chainId: BASE_CHAIN_ID });
@@ -25,15 +28,35 @@ export const useOvaultQuote = ({
   const assetOftHub = useDeployedContractInfo("MyHTSConnector", 296);
 
   const query = useQuery({
-    queryKey: ["ovault-quote", side, amount, address, oftDeployment?.address],
-    enabled:
-      side === "redeem"
-        ? Boolean(address)
-        : Boolean(address && baseClient && hederaClient && oftDeployment && vaultDeployment && composerDeployment),
+    queryKey: ["ovault-quote", side, redeemMode, amount, address, oftDeployment?.address],
+    enabled: Boolean(address && hederaClient && vaultDeployment && composerDeployment),
     queryFn: async () => {
-      // Redeem/divest is local on Hedera: composer.redeemAndSend() redeems shares and
-      // transfers the asset locally, so there is no LayerZero message fee.
-      if (side === "redeem") return 0n;
+      if (!hederaClient || !vaultDeployment || !composerDeployment) return 0n;
+      if (side === "redeem") {
+        if (redeemMode === "local") return 0n;
+        if (!address || !assetOftHub?.address) return 0n;
+        const shareAmount = parseEther(amount || "0");
+        if (shareAmount <= 0n) return 0n;
+        const previewRaw = await hederaClient.readContract({
+          address: vaultDeployment.address,
+          abi: vaultDeployment.abi,
+          functionName: "previewRedeem",
+          args: [shareAmount],
+        });
+        const expectedAssets = previewRaw as unknown as bigint;
+        const sendParam = buildRedeemSendParam({
+          receiverAddress: address,
+          dstEid: BASE_EID,
+          minAmountLD: expectedAssets,
+        });
+        const quoteRaw = await hederaClient.readContract({
+          address: composerDeployment.address,
+          abi: composerDeployment.abi,
+          functionName: "quoteSend",
+          args: [address, assetOftHub.address as `0x${string}`, shareAmount, sendParam],
+        });
+        return normalizeQuote(quoteRaw).nativeFee;
+      }
 
       if (!address || !baseClient || !hederaClient || !oftDeployment || !vaultDeployment || !composerDeployment) {
         return 0n;
