@@ -3,6 +3,7 @@
 import { useAccount, usePublicClient } from "wagmi";
 import { encodeFunctionData, parseEther } from "viem";
 import {
+  applySlippageBps,
   BASE_EID,
   buildRedeemSendParam,
   buildOvaultSendParam,
@@ -16,6 +17,7 @@ import { useDeployedContractInfo, useScaffoldWriteContract } from "~~/hooks/scaf
 const BASE_CHAIN_ID = 84532;
 const HEDERA_CHAIN_ID = 296;
 const HEDERA_GAS_LIMIT = 15_000_000n;
+const HEDERA_TINYBAR_TO_WEIBAR = 10_000_000_000n;
 const ENDPOINT_ABI = [
   {
     inputs: [
@@ -102,11 +104,12 @@ export const useOvaultSend = (side: Side, redeemMode: RedeemMode = "local") => {
         args: [shareAmount],
       });
       const expectedAssets = previewRaw as unknown as bigint;
+      const minAssetsOut = applySlippageBps(expectedAssets);
       const redeemDstEid = redeemMode === "crossChainToBase" ? BASE_EID : HEDERA_EID;
       const sendParam = buildRedeemSendParam({
         receiverAddress: address,
         dstEid: redeemDstEid,
-        minAmountLD: expectedAssets,
+        minAmountLD: redeemMode === "crossChainToBase" ? minAssetsOut : expectedAssets,
       });
 
       const allowance = (await hederaClient.readContract({
@@ -140,7 +143,9 @@ export const useOvaultSend = (side: Side, redeemMode: RedeemMode = "local") => {
         "redeemAndSend",
         [shareAmount, sendParam, address],
         {
-          value: redeemMsgValue,
+          // Hedera RPC tx value is wei-like, while contracts read msg.value in tinybars.
+          // Scale only tx value so LZ fee checks pass on Hedera.
+          value: redeemMode === "crossChainToBase" ? redeemMsgValue * HEDERA_TINYBAR_TO_WEIBAR : redeemMsgValue,
           gas: HEDERA_GAS_LIMIT,
         },
       )) as `0x${string}`;

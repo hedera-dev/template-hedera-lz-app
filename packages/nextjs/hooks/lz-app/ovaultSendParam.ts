@@ -9,6 +9,7 @@ export type RedeemMode = "local" | "crossChainToBase";
 export const BASE_EID = 40245;
 export const HEDERA_EID = 40285;
 export const DEFAULT_COMPOSE_VALUE = parseEther("0.025");
+export const DEFAULT_REDEEM_SLIPPAGE_BPS = 100; // 1.00%
 
 export const addressToBytes32 = (address: `0x${string}`): `0x${string}` => {
   return `0x${address.slice(2).padStart(64, "0")}` as `0x${string}`;
@@ -225,4 +226,11 @@ export const buildRedeemSendParam = ({
     composeMsg: "0x" as `0x${string}`,
     oftCmd: "0x" as `0x${string}`,
   };
+};
+
+export const applySlippageBps = (amount: bigint, slippageBps = DEFAULT_REDEEM_SLIPPAGE_BPS): bigint => {
+  if (amount <= 0n) return 0n;
+  const bounded = Math.max(0, Math.min(9_999, slippageBps));
+  const keptBps = 10_000n - BigInt(bounded);
+  return (amount * keptBps) / 10_000n;
 };

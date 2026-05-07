@@ -9,3 +9,5 @@ export * from "./useOftEvents";
 export * from "./useLayerZeroScanLink";
 export * from "./useProcessReceive";
 export * from "./useBridgeRelayer";
+export * from "./vaultFlowTypes";
+export * from "./useVaultFlowController";

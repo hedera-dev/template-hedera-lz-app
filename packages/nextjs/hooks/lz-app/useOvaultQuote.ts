@@ -3,7 +3,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { parseEther } from "viem";
 import { useAccount, usePublicClient } from "wagmi";
-import { buildRedeemSendParam, buildOvaultSendParam, normalizeQuote, RedeemMode, Side, BASE_EID } from "./ovaultSendParam";
+import {
+  applySlippageBps,
+  buildRedeemSendParam,
+  buildOvaultSendParam,
+  normalizeQuote,
+  RedeemMode,
+  Side,
+  BASE_EID,
+} from "./ovaultSendParam";
 import { useDeployedContractInfo } from "~~/hooks/scaffold-hbar";
 
 const BASE_CHAIN_ID = 84532;
@@ -44,10 +52,11 @@ export const useOvaultQuote = ({
           args: [shareAmount],
         });
         const expectedAssets = previewRaw as unknown as bigint;
+        const minAssetsOut = applySlippageBps(expectedAssets);
         const sendParam = buildRedeemSendParam({
           receiverAddress: address,
           dstEid: BASE_EID,
-          minAmountLD: expectedAssets,
+          minAmountLD: minAssetsOut,
         });
         const quoteRaw = await hederaClient.readContract({
           address: composerDeployment.address,

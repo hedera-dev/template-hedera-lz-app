@@ -375,8 +375,8 @@ export default function BridgePage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Bridge (Chapter 1)</h1>
-      <div className="card bg-base-200 p-4 md:p-5 space-y-4 border border-base-300">
-        <div className="card bg-base-100 border border-base-300 rounded-2xl p-4 md:p-5 space-y-5 overflow-hidden">
+      <div className="card bg-base-200 p-4 rounded-xl space-y-4 border border-base-300">
+        <div className="card bg-base-100 border border-base-300 rounded-xl p-4 space-y-5 overflow-hidden">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold">Bridge Route</div>
@@ -455,6 +455,32 @@ export default function BridgePage() {
               </div>
             </div>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-base-300 bg-base-200/30 px-3 py-2">
+            <p className="text-xs text-base-content/65">
+              Submit once on {sourceMeta.shortLabel}. Destination execution is finalized by relayer.
+            </p>
+            <button
+              className="btn btn-primary btn-sm rounded-lg px-4 whitespace-nowrap"
+              onClick={onSend}
+              disabled={bridge.isPending || sourceSendSubmitted || processInFlight}
+            >
+              {bridge.isPending ? (
+                <LoadingText>{fromChain === "hedera" ? "Approve + send" : "Sending..."}</LoadingText>
+              ) : processInFlight ? (
+                <LoadingText>Finalizing...</LoadingText>
+              ) : sourceSendSubmitted ? (
+                `Submitted (${sourceMeta.shortLabel})`
+              ) : routeSupported ? (
+                isSourceChain ? (
+                  `Bridge to ${destinationMeta.shortLabel}`
+                ) : (
+                  `Switch to ${sourceMeta.shortLabel}`
+                )
+              ) : (
+                "Route unavailable"
+              )}
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
           <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
@@ -492,27 +518,6 @@ export default function BridgePage() {
             Switch to {sourceMeta.label} to submit the source bridge transaction.
           </div>
         ) : null}
-        <button
-          className="btn btn-primary"
-          onClick={onSend}
-          disabled={bridge.isPending || sourceSendSubmitted || processInFlight}
-        >
-          {bridge.isPending ? (
-            <LoadingText>{fromChain === "hedera" ? "Approving and sending..." : "Sending..."}</LoadingText>
-          ) : processInFlight ? (
-            <LoadingText>Relayer processing destination...</LoadingText>
-          ) : sourceSendSubmitted ? (
-            `Source transaction submitted (${sourceMeta.shortLabel})`
-          ) : routeSupported ? (
-            isSourceChain ? (
-              `Bridge to ${destinationMeta.shortLabel}`
-            ) : (
-              `Switch to ${sourceMeta.label}`
-            )
-          ) : (
-            "Route not supported"
-          )}
-        </button>
         {bridgeError ? <div className="alert alert-error text-sm">{bridgeError}</div> : null}
 
         {hasStartedFlow ? (
