@@ -2,6 +2,12 @@
 
 This frontend demonstrates relayer-assisted LayerZero flows between Base Sepolia and Hedera Testnet.
 
+If this project was scaffolded through `create-scaffold-hbar`, run dependency install from the generated repository root first:
+
+```bash
+pnpm install
+```
+
 Main goals:
 
 - single-signature UX for primary user actions

@@ -1,0 +1,24 @@
+{
+  "name": "template-hedera-lz-app",
+  "description": "LayerZero on Hedera template (demo compatibility mode)",
+  "version": "0.1.0",
+  "create-scaffold-hbar": {
+    "capabilities": {
+      "frontend": ["nextjs-app"],
+      "solidityFramework": ["hardhat", "foundry"]
+    },
+    "defaults": {
+      "frontend": "nextjs-app",
+      "solidityFramework": "hardhat"
+    },
+    "outro": {
+      "steps": [
+        "+Demo-fast note",
+        "Use this template with pnpm at the project root.",
+        "{run:hardhat:compile} may not match this template scripts.",
+        "Run: pnpm install",
+        "Then follow this repo README for deploy and runtime commands."
+      ]
+    }
+  }
+}

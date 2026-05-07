@@ -2,6 +2,20 @@
 
 Progressive tutorial for Hedera developers. Start with a simple OFT transfer, then layer in OVault (Hedera hub, Base spoke). Testnet-only with Simple Worker mocks; swap to production DVNs/executors for mainnet.
 
+## Using with create-scaffold-hbar
+
+This repository is compatible with external template scaffolding. For demo speed, scaffold first, then treat the generated project like a clone of this repo.
+
+1. Scaffold with `create-scaffold-hbar` and this template.
+2. Move into the generated project root.
+3. Install dependencies with:
+
+```bash
+pnpm install
+```
+
+4. Continue with the commands in this README (`pnpm hardhat ...`, `pnpm compile`, `pnpm next:dev`).
+
 ## Requirements
 
 - `Node.js` - ` >=18.16.0`
@@ -129,9 +143,20 @@ If a message is pending, process on the destination chain with the Simple Worker
 - `config/` – LayerZero configs for assets/shares (Simple Worker ready)
 - `tasks/` – `lz:oft:send`, `lz:ovault:send`, Simple Worker helpers
 - `deployments/` – generated deployment artifacts per chain (Base Sepolia, Hedera testnet)
+- `packages/nextjs/` – frontend app
+- `packages/hardhat/` and `packages/foundry/` – compatibility placeholders for scaffold framework selection (post-demo these will host the real split)
 
 ## Notes
 
 - Testnets often lack default DVNs/executors, so we deploy Simple Worker mocks to exercise the flows. For mainnet, use the official contracts from LayerZero: https://docs.layerzero.network/v2/deployments/deployed-contracts?stages=mainnet
 - Gas values in configs are defaults; profile and tune for your contracts.
 - To change hub/spoke or add chains, update `devtools/deployConfig.ts` and regenerate wiring.
+
+## Post-demo backlog (proper package split)
+
+- Move hardhat contracts/deploy/tasks/config into `packages/hardhat`.
+- Move foundry contracts/scripts/tests/config into `packages/foundry`.
+- Keep shared artifacts and generated outputs isolated per package.
+- Align root scripts/workspaces with package boundaries and avoid mixed root/package concerns.
+- Decide final package manager strategy (native pnpm flow vs create-scaffold-hbar npm/yarn normalization).
+- Re-validate all `create-scaffold-hbar` option combinations including install mode.
