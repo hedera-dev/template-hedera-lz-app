@@ -83,9 +83,6 @@
       "ethers": "^5.7.2",
       "hardhat-deploy": "^0.12.1",
       "zod": "3.22.4"
-    },
-    "patchedDependencies": {
-      "@walletconnect/modal-core@2.7.0": "patches/@walletconnect__modal-core@2.7.0.patch"
     }
   },
   "overrides": {
