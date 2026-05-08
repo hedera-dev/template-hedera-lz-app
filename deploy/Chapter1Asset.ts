@@ -6,9 +6,14 @@ import { EndpointId } from '@layerzerolabs/lz-definitions'
 
 // Fetch Hedera USD/HBAR rate (mirrornode). Fallback to env override or a static default.
 async function getHtsCreateFeeWei(): Promise<string> {
+    const WEI_PER_HBAR = 1_000_000_000_000_000_000n
+    const MIN_HBAR = BigInt(process.env.HTS_CREATE_FEE_MIN_HBAR || '20')
+    const minFeeWei = MIN_HBAR * WEI_PER_HBAR
+
     // Prefer explicit override (already in wei)
     if (process.env.HTS_CREATE_FEE_WEI) {
-        return process.env.HTS_CREATE_FEE_WEI
+        const overrideFeeWei = BigInt(process.env.HTS_CREATE_FEE_WEI)
+        return (overrideFeeWei >= minFeeWei ? overrideFeeWei : minFeeWei).toString()
     }
 
     const DEFAULT_USD_CENTS = 100 // $1.00
@@ -23,12 +28,12 @@ async function getHtsCreateFeeWei(): Promise<string> {
         const { cent_equivalent, hbar_equivalent } = data.current_rate
         const tinybar = (DEFAULT_USD_CENTS * hbar_equivalent * TINYBAR_PER_HBAR) / cent_equivalent
         // Scale tinybar (1e8) to wei-like (1e18) for hardhat deploy value
-        const weiLike = Math.floor(tinybar) * WEI_PER_TINYBAR
-        return weiLike.toString()
+        const weiLike = BigInt(Math.floor(tinybar)) * BigInt(WEI_PER_TINYBAR)
+        return (weiLike >= minFeeWei ? weiLike : minFeeWei).toString()
     } catch {
         // Fallback: assume $1 ≈ 1 HBAR -> 1e8 tinybar, scale to wei
-        const fallbackWei = TINYBAR_PER_HBAR * WEI_PER_TINYBAR
-        return fallbackWei.toString()
+        const fallbackWei = BigInt(TINYBAR_PER_HBAR) * BigInt(WEI_PER_TINYBAR)
+        return (fallbackWei >= minFeeWei ? fallbackWei : minFeeWei).toString()
     }
 }
 

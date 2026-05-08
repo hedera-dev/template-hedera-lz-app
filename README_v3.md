@@ -4,11 +4,13 @@ Build cross-chain applications using LayerZero on Hedera. This tutorial takes yo
 
 ## What You'll Learn
 
-| Chapter | Topic | What You'll Build |
-|---------|-------|-------------------|
-| 1 | Cross-Chain OFT | Send native ETH from Base to Hedera as an HTS token |
-| 2 | Cross-Chain Vault | ERC4626 vault with omnichain deposits and redemptions |
-| 3 | ETF Strategy | Auto-investing vault that swaps into a 50/50 HBAR + HUSTLERS basket |
+
+| Chapter | Topic             | What You'll Build                                                   |
+| ------- | ----------------- | ------------------------------------------------------------------- |
+| 1       | Cross-Chain OFT   | Send native ETH from Base to Hedera as an HTS token                 |
+| 2       | Cross-Chain Vault | ERC4626 vault with omnichain deposits and redemptions               |
+| 3       | ETF Strategy      | Auto-investing vault that swaps into a 50/50 HBAR + HUSTLERS basket |
+
 
 ## Prerequisites
 
@@ -60,10 +62,12 @@ pnpm compile
 
 ### Contracts
 
-| Contract | Chain | Purpose |
-|----------|-------|---------|
-| `MyNativeOFTAdapter` | Base | Locks native ETH, sends cross-chain message |
-| `MyHTSConnector` | Hedera | Mints HTS-wrapped ETH on receive |
+
+| Contract             | Chain  | Purpose                                     |
+| -------------------- | ------ | ------------------------------------------- |
+| `MyNativeOFTAdapter` | Base   | Locks native ETH, sends cross-chain message |
+| `MyHTSConnector`     | Hedera | Mints HTS-wrapped ETH on receive            |
+
 
 ### Step 1: Deploy the OFT Contracts
 
@@ -72,6 +76,7 @@ pnpm hardhat lz:deploy --tags chapter1-asset
 ```
 
 This deploys:
+
 - `MyNativeOFTAdapter` on Base Sepolia
 - `MyHTSConnector` on Hedera Testnet
 
@@ -117,14 +122,15 @@ pnpm hardhat lz:oft:send \
 ```
 
 > **Note:** The task automatically handles HTS token approval via the Hedera precompile. Ensure you have HTS-wrapped WETH tokens on Hedera (from a previous Base → Hedera transfer) and that the `MyNativeOFTAdapter` on Base has sufficient locked ETH to unlock.
-
 **Endpoint IDs:**
+
 - Base Sepolia: `40245`
 - Hedera Testnet: `40285`
 
 ### Verify Success
 
 Check both block explorers to confirm the transfer:
+
 - [Base Sepolia Explorer](https://sepolia.basescan.org)
 - [HashScan (Hedera)](https://hashscan.io/testnet)
 
@@ -136,12 +142,14 @@ Check both block explorers to confirm the transfer:
 
 ### Contracts
 
-| Contract | Chain | Purpose |
-|----------|-------|---------|
-| `MyERC4626` | Hedera | Tokenized vault (holds assets, issues shares) |
-| `MyShareOFTAdapter` | Hedera | Enables cross-chain share transfers |
-| `MyOVaultComposer` | Hedera | Handles deposit/redeem + cross-chain routing |
-| `MyShareOFT` | Base | Represents vault shares on Base |
+
+| Contract            | Chain  | Purpose                                       |
+| ------------------- | ------ | --------------------------------------------- |
+| `MyERC4626`         | Hedera | Tokenized vault (holds assets, issues shares) |
+| `MyShareOFTAdapter` | Hedera | Enables cross-chain share transfers           |
+| `MyOVaultComposer`  | Hedera | Handles deposit/redeem + cross-chain routing  |
+| `MyShareOFT`        | Base   | Represents vault shares on Base               |
+
 
 ### Step 1: Deploy Vault Contracts
 
@@ -205,12 +213,14 @@ pnpm hardhat lz:ovault:send \
 
 ### Contracts
 
-| Contract | Chain | Purpose |
-|----------|-------|---------|
-| `MyERC4626Strategy` | Hedera | Vault with auto-invest on deposit |
-| `HederaEtfStrategy` | Hedera | Swaps WETH → 50% HBAR + 50% HUSTLERS |
-| `MyShareOFTAdapterStrategy` | Hedera | Share adapter for strategy vault |
-| `MyOVaultComposerStrategy` | Hedera | Cross-chain composer for strategy vault |
+
+| Contract                    | Chain  | Purpose                                 |
+| --------------------------- | ------ | --------------------------------------- |
+| `MyERC4626Strategy`         | Hedera | Vault with auto-invest on deposit       |
+| `HederaEtfStrategy`         | Hedera | Swaps WETH → 50% HBAR + 50% HUSTLERS    |
+| `MyShareOFTAdapterStrategy` | Hedera | Share adapter for strategy vault        |
+| `MyOVaultComposerStrategy`  | Hedera | Cross-chain composer for strategy vault |
+
 
 ### Step 1: Set Up Liquidity Pools
 
@@ -315,7 +325,6 @@ export default createMeshConfig({
 ### "Transaction reverted: HTS association failed"
 
 The contract needs to be associated with the HTS token before receiving it. This is handled automatically by the contracts, but ensure you have enough HBAR for the association fee.
-
 ### "Hedera → Base bridge fails" / "Insufficient liquidity"
 
 The `MyNativeOFTAdapter` on Base uses a lock/unlock model. To bridge back from Hedera:
@@ -327,7 +336,6 @@ Check adapter balance:
 ```bash
 cast balance <MY_NATIVE_OFT_ADAPTER_ADDRESS> --rpc-url $RPC_URL_BASE_SEPOLIA
 ```
-
 ### "Insufficient funds for gas"
 
 Hedera operations require HBAR. Fund your account at the [Hedera Portal](https://portal.hedera.com/).
@@ -351,12 +359,14 @@ pnpm hardhat lz:deploy --tags SimpleExecutorMock
 ### OFT (Omnichain Fungible Token)
 
 LayerZero's standard for cross-chain tokens. Two variants:
+
 - **OFT**: Mint/burn model (new tokens on destination)
 - **OFTAdapter**: Lock/unlock model (wraps existing tokens)
 
 ### ERC4626 Vault
 
 Standardized vault interface:
+
 - `deposit(assets)` → receive shares
 - `redeem(shares)` → receive assets
 
@@ -376,3 +386,4 @@ LayerZero's composability feature. After receiving tokens, the receiver can trig
 - [Hedera Developer Docs](https://docs.hedera.com/)
 - [OpenZeppelin ERC4626](https://docs.openzeppelin.com/contracts/4.x/erc4626)
 - [SaucerSwap Docs](https://docs.saucerswap.finance/)
+
