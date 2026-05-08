@@ -5,6 +5,20 @@ import { useVaultState } from "~~/hooks/lz-app";
 
 const formatEthValue = (value?: bigint) => (value !== undefined ? formatEther(value) : "-");
 const formatCount = (value?: number) => (value === undefined ? "-" : value.toString());
+const WAD = 10n ** 18n;
+
+const formatSharePrice = (assets?: bigint, supply?: bigint) => {
+  if (assets === undefined || supply === undefined || supply === 0n) return "-";
+
+  const priceWad = (assets * WAD) / supply;
+  const asNumber = Number(formatEther(priceWad));
+  if (!Number.isFinite(asNumber)) return "-";
+
+  return asNumber.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: asNumber < 1 ? 6 : 4,
+  });
+};
 
 export default function StrategyPage() {
   const { totalAssets, totalSupply, userShares, investedAssets, strategyAddress, strategyHustlers, strategyHbar, strategyActivity } =
@@ -13,6 +27,7 @@ export default function StrategyPage() {
   const assets = formatEthValue(totalAssets.data as bigint | undefined);
   const supply = formatEthValue(totalSupply.data as bigint | undefined);
   const shares = formatEthValue(userShares.data as bigint | undefined);
+  const sharePrice = formatSharePrice(totalAssets.data as bigint | undefined, totalSupply.data as bigint | undefined);
   const invested = formatEthValue(investedAssets.data as bigint | undefined);
   const stratHustlers = formatEthValue(strategyHustlers.data as bigint | undefined);
   const stratHbar = strategyHbar.data?.formatted || "-";
@@ -30,7 +45,7 @@ export default function StrategyPage() {
 
       <div className="card bg-base-200 border border-base-300 rounded-xl p-4 space-y-3">
         <h2 className="font-semibold">Vault Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           <div className="bg-base-100 border border-base-300 rounded-xl p-3 space-y-1">
             <p className="text-xs uppercase tracking-wide text-base-content/60">Total Assets</p>
             <p className="text-xl font-semibold">{assets}</p>
@@ -45,6 +60,11 @@ export default function StrategyPage() {
             <p className="text-xs uppercase tracking-wide text-base-content/60">Your Shares</p>
             <p className="text-xl font-semibold">{shares}</p>
             <p className="text-xs text-base-content/60">Your ownership units in the vault. Redeems use this value.</p>
+          </div>
+          <div className="bg-base-100 border border-base-300 rounded-xl p-3 space-y-1">
+            <p className="text-xs uppercase tracking-wide text-base-content/60">Share Price</p>
+            <p className="text-xl font-semibold">{sharePrice}</p>
+            <p className="text-xs text-base-content/60">Current assets per share (total assets divided by total share supply).</p>
           </div>
         </div>
       </div>

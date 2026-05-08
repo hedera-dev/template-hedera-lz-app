@@ -44,6 +44,15 @@ const ENDPOINT_ABI = [
 const OFT_SENT_EVENT = parseAbiItem(
   "event OFTSent(bytes32 indexed guid, uint32 dstEid, address indexed fromAddress, uint256 amountSentLD, uint256 amountReceivedLD)",
 );
+const MAX_LOG_BLOCK_RANGE = 9_999n;
+type OftSentLog = {
+  args: {
+    guid?: `0x${string}`;
+    fromAddress?: `0x${string}`;
+    amountSentLD?: bigint;
+    amountReceivedLD?: bigint;
+  };
+};
 
 const intentToModes = (intent: VaultIntent): { mode: "deposit" | "redeem"; redeemMode: RedeemMode } => {
   if (intent === "deposit_base_to_hedera") return { mode: "deposit", redeemMode: "local" };
@@ -356,6 +365,31 @@ export const useVaultFlowController = () => {
     }
   };
 
+  const fetchOftSentLogsInBatches = async (
+    fromBlock: bigint,
+    toBlock: bigint,
+  ): Promise<OftSentLog[]> => {
+    if (!baseClient || !sourceOft) return [];
+
+    const logs: OftSentLog[] = [];
+    let cursor = fromBlock;
+
+    while (cursor <= toBlock) {
+      const batchToBlock = cursor + MAX_LOG_BLOCK_RANGE < toBlock ? cursor + MAX_LOG_BLOCK_RANGE : toBlock;
+      const batchLogs = await baseClient.getLogs({
+        address: sourceOft.address,
+        event: OFT_SENT_EVENT,
+        fromBlock: cursor,
+        toBlock: batchToBlock,
+      });
+      logs.push(...(batchLogs as unknown as OftSentLog[]));
+      if (batchToBlock === toBlock) break;
+      cursor = batchToBlock + 1n;
+    }
+
+    return logs;
+  };
+
   const fetchPendingVaultMessages = async (): Promise<VaultPendingMessage[]> => {
     if (!baseClient || !hederaClient || !sourceOft || !vaultDeployment || !composerDeployment) {
       throw new Error("Missing clients/deployments for catch-up");
@@ -386,7 +420,7 @@ export const useVaultFlowController = () => {
 
     const currentBlock = await baseClient.getBlockNumber();
     const startBlock = currentBlock > 50000n ? currentBlock - 50000n : 0n;
-    const logs = await baseClient.getLogs({ address: sourceOft.address, event: OFT_SENT_EVENT, fromBlock: startBlock, toBlock: currentBlock });
+    const logs = await fetchOftSentLogsInBatches(startBlock, currentBlock);
     const srcOappB32 = addressToBytes32(sourceOft.address as `0x${string}`);
     const dstOappB32 = addressToBytes32(dstOftAddress);
     const byGuid = new Map<string, (typeof logs)[number]>();
