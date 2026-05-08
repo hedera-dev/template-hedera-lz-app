@@ -12,11 +12,11 @@
       "solidityFramework": "hardhat"
     },
     "outro": {
+      "installCommand": "pnpm install",
       "steps": [
         "+Demo-fast note",
         "Use this template with pnpm at the project root.",
         "{run:hardhat:compile} may not match this template scripts.",
-        "Run: pnpm install",
         "Then follow this repo README for deploy and runtime commands."
       ]
     }
