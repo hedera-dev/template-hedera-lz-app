@@ -5,18 +5,19 @@
   "create-scaffold-hbar": {
     "capabilities": {
       "frontend": ["nextjs-app"],
-      "solidityFramework": ["hardhat", "foundry"]
+      "solidityFramework": ["hardhat", "foundry"],
+      "packageManager": ["none"]
     },
     "defaults": {
       "frontend": "nextjs-app",
-      "solidityFramework": "hardhat"
+      "solidityFramework": "hardhat",
+      "packageManager": "none"
     },
     "outro": {
       "installCommand": "pnpm install",
       "steps": [
         "+Demo-fast note",
         "Use this template with pnpm at the project root.",
-        "{run:hardhat:compile} may not match this template scripts.",
         "Then follow this repo README for deploy and runtime commands."
       ]
     }
