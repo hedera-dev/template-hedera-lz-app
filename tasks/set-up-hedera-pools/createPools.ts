@@ -20,7 +20,8 @@ const FACTORY_ABI = [
     'function createPair(address tokenA,address tokenB) payable returns (address)',
 ]
 const OFT_ABI = ['function token() view returns (address)']
-const ERC20_ABI = ['function approve(address,uint256) returns (bool)']
+const ERC20_ABI = ['function approve(address,uint256) returns (bool)', 'function balanceOf(address) view returns (uint256)']
+const ASSOCIATION_ABI = ['function associate()']
 
 const CONFIG_PATH = 'env/addresses.testnet.json'
 const NETWORK_KEY = 'hedera-testnet'
@@ -124,9 +125,77 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 ? BigNumber.from(args.txGasPriceWei)
                 : computedGasPrice
 
+        const hasErrorText = (error: unknown, value: string): boolean => {
+            const text = error instanceof Error ? error.message : String(error)
+            return text.includes(value)
+        }
+
+        const approveWithAssociationRecovery = async (
+            tokenAddress: string,
+            token: Contract,
+            spender: string,
+            amount: BigNumber,
+            label: string
+        ): Promise<void> => {
+            try {
+                await (await token.approve(spender, amount)).wait()
+                return
+            } catch (error) {
+                if (!hasErrorText(error, 'TOKEN_NOT_ASSOCIATED_TO_ACCOUNT')) {
+                    throw error
+                }
+
+                console.warn(`${label}: deployer is not associated. Attempting token association and retry...`)
+                const associationToken = new Contract(tokenAddress, ASSOCIATION_ABI, signer)
+                try {
+                    await (
+                        await associationToken.associate({
+                            gasLimit: maxTxGasLimit,
+                            gasPrice: effectiveGasPrice,
+                        })
+                    ).wait()
+                    console.log(`${label}: association successful`)
+                } catch (associateError) {
+                    if (!hasErrorText(associateError, 'TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT')) {
+                        throw associateError
+                    }
+                    console.log(`${label}: already associated`)
+                }
+
+                await (await token.approve(spender, amount)).wait()
+                console.log(`${label}: approve successful after association recovery`)
+            }
+        }
+
         const totalWethLiquidity = wethLiquidity.mul(2)
-        await (await weth.approve(addresses.routerV1, totalWethLiquidity)).wait()
-        await (await hustlers.approve(addresses.routerV1, hustlersLiquidity)).wait()
+        const signerAddress = await signer.getAddress()
+        const [wethBalance, hustlersBalance] = await Promise.all([
+            weth.balanceOf(signerAddress),
+            hustlers.balanceOf(signerAddress),
+        ])
+
+        if (wethBalance.lt(totalWethLiquidity)) {
+            throw new Error(
+                `Insufficient WETH balance for pool setup. Need ${totalWethLiquidity.toString()} but wallet has ${wethBalance.toString()}. ` +
+                    `Bridge/fund WETH to the deployer first, then retry.`
+            )
+        }
+
+        if (hustlersBalance.lt(hustlersLiquidity)) {
+            throw new Error(
+                `Insufficient HUSTLERS balance for pool setup. Need ${hustlersLiquidity.toString()} but wallet has ${hustlersBalance.toString()}. ` +
+                    `Fund HUSTLERS to the deployer (or rerun token setup) then retry.`
+            )
+        }
+
+        await approveWithAssociationRecovery(wethToken, weth, addresses.routerV1, totalWethLiquidity, 'WETH')
+        await approveWithAssociationRecovery(
+            addresses.hustlersToken,
+            hustlers,
+            addresses.routerV1,
+            hustlersLiquidity,
+            'HUSTLERS'
+        )
 
         const totalHbar = poolFeeWei.add(hbarLiquidityWei)
         const signerBalance = await signer.getBalance()

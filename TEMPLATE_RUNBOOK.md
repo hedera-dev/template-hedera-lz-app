@@ -43,7 +43,7 @@ cp .env.example .env
 cp packages/nextjs/.env.example packages/nextjs/.env.local
 ```
 
-Set required values in `.env`:
+Set required values in root `.env`:
 
 ```bash
 PRIVATE_KEY=0x...
@@ -51,6 +51,12 @@ RPC_URL_HEDERA_TESTNET=https://testnet.hashio.io/api
 RPC_URL_BASE_SEPOLIA=https://sepolia.base.org
 NEXT_PUBLIC_RPC_URL_HEDERA_TESTNET=https://testnet.hashio.io/api
 NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA=https://sepolia.base.org
+RELAYER_PRIVATE_KEY=0x...
+```
+
+Set relayer values in `packages/nextjs/.env.local` too (this is what Next.js server routes read):
+
+```bash
 RELAYER_PRIVATE_KEY=0x...
 ```
 
@@ -125,8 +131,38 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.share.strategy.config.t
 
 ## 5) Create liquidity required by vault strategy
 
+Before creating pools, make sure the deployer wallet has enough tokens on Hedera:
+- WETH (used in both pools, so `2x` the configured WETH liquidity)
+- HUSTLERS
+
+Deploy HUSTLERS first:
+
 ```bash
 pnpm hardhat lz:setup:deploy-hustlers --network hedera-testnet
+```
+
+Bridge WETH from Base to Hedera to fund pool creation (example amount):
+
+```bash
+pnpm hardhat lz:oft:send \
+  --src-eid 40245 \
+  --dst-eid 40285 \
+  --amount 0.02 \
+  --to <DEPLOYER_EVM_ADDRESS> \
+  --simple-workers
+```
+
+Optional balance checks before creating pools:
+
+```bash
+cast call <MY_HTS_CONNECTOR_ADDRESS> "token()(address)" --rpc-url $RPC_URL_HEDERA_TESTNET
+cast call <WETH_TOKEN_ADDRESS> "balanceOf(address)(uint256)" <DEPLOYER_EVM_ADDRESS> --rpc-url $RPC_URL_HEDERA_TESTNET
+cast call <HUSTLERS_TOKEN_ADDRESS> "balanceOf(address)(uint256)" <DEPLOYER_EVM_ADDRESS> --rpc-url $RPC_URL_HEDERA_TESTNET
+```
+
+Then create pools:
+
+```bash
 pnpm hardhat lz:setup:create-pools --network hedera-testnet
 ```
 
