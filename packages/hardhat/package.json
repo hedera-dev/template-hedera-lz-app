@@ -1,6 +1,13 @@
 {
-  "name": "@template-hedera-lz-app/hardhat",
+  "name": "@sh/hardhat",
   "private": true,
-  "version": "0.0.0",
-  "description": "Compatibility placeholder package"
+  "version": "0.1.0",
+  "description": "Hardhat workspace for LayerZero Hedera template",
+  "scripts": {
+    "compile": "pnpm exec hardhat compile",
+    "clean": "pnpm exec hardhat clean",
+    "test": "pnpm exec hardhat test",
+    "deploy": "pnpm exec hardhat lz:deploy",
+    "wire": "pnpm exec hardhat lz:oapp:wire"
+  }
 }

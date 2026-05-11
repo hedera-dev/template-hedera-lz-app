@@ -54,6 +54,22 @@ cp .env.example .env
 pnpm compile
 ```
 
+## Frontend Runtime (After Deploy/Wire)
+
+When you redeploy contracts, regenerate frontend contract bindings before running the app:
+
+```bash
+# Rebuild deployed contracts mapping from hardhat deployments/*
+pnpm next:gen-contracts
+
+# Start the frontend
+pnpm next:dev
+```
+
+Then open `http://localhost:3000`.
+
+For operational frontend checks and relayer notes, see `RUNBOOK.md`.
+
 ---
 
 ## Chapter 1: Cross-Chain OFT
@@ -296,34 +312,39 @@ pnpm hardhat lz:ovault:send \
 ## Project Structure
 
 ```
-├── contracts/
-│   ├── MyHTSConnector.sol          # Ch.1 - HTS-wrapped ETH on Hedera
-│   ├── MyNativeOFTAdapter.sol      # Ch.1 - Native ETH adapter on Base
-│   ├── MyERC4626.sol               # Ch.2 - Basic vault
-│   ├── MyShareOFT.sol              # Ch.2/3 - Share token (Base)
-│   ├── MyShareOFTAdapter.sol       # Ch.2 - Share adapter (Hedera)
-│   ├── MyOVaultComposer.sol        # Ch.2 - Cross-chain composer
-│   ├── MyERC4626Strategy.sol       # Ch.3 - Auto-invest vault
-│   ├── HederaEtfStrategy.sol       # Ch.3 - 50/50 basket strategy
-│   ├── MyShareOFTAdapterStrategy.sol # Ch.3 - Strategy share adapter
-│   ├── MyOVaultComposerStrategy.sol  # Ch.3 - Strategy composer
-│   ├── hts/                        # Hedera Token Service contracts
-│   └── mocks/                      # Test mocks (DVN, Executor)
+├── packages/
+│   ├── hardhat/
+│   │   ├── contracts/
+│   │   │   ├── MyHTSConnector.sol          # Ch.1 - HTS-wrapped ETH on Hedera
+│   │   │   ├── MyNativeOFTAdapter.sol      # Ch.1 - Native ETH adapter on Base
+│   │   │   ├── MyERC4626.sol               # Ch.2 - Basic vault
+│   │   │   ├── MyShareOFT.sol              # Ch.2/3 - Share token (Base)
+│   │   │   ├── MyShareOFTAdapter.sol       # Ch.2 - Share adapter (Hedera)
+│   │   │   ├── MyOVaultComposer.sol        # Ch.2 - Cross-chain composer
+│   │   │   ├── MyERC4626Strategy.sol       # Ch.3 - Auto-invest vault
+│   │   │   ├── HederaEtfStrategy.sol       # Ch.3 - 50/50 basket strategy
+│   │   │   ├── MyShareOFTAdapterStrategy.sol # Ch.3 - Strategy share adapter
+│   │   │   ├── MyOVaultComposerStrategy.sol  # Ch.3 - Strategy composer
+│   │   │   ├── hts/                        # Hedera Token Service contracts
+│   │   │   └── mocks/                      # Test mocks (DVN, Executor)
+│   │   ├── deploy/                         # Hardhat deployment scripts
+│   │   ├── devtools/                       # Deployment configuration
+│   │   ├── tasks/                          # Hardhat tasks for sending tokens
+│   │   └── config/                         # LayerZero mesh configs
+│   └── nextjs/                             # Frontend app
 │
-├── config/
-│   ├── shared.ts                   # LayerZero config factory
-│   ├── layerzero.asset.config.ts   # Asset mesh (Ch.1 + vault assets)
-│   ├── layerzero.share.config.ts   # Share mesh (Ch.2)
-│   └── layerzero.share.strategy.config.ts # Strategy share mesh (Ch.3)
+├── config/                                 # Root wire entrypoints (re-export from packages/hardhat/config)
+│   ├── layerzero.asset.config.ts
+│   ├── layerzero.share.config.ts
+│   └── layerzero.share.strategy.config.ts
 │
-├── deploy/                         # Hardhat deployment scripts
-├── devtools/                       # Deployment configuration
-└── tasks/                          # Hardhat tasks for sending tokens
+├── deployments/                            # Generated deployment artifacts per chain
+└── hardhat.config.ts                       # Root hardhat entrypoint (loads packages/hardhat config)
 ```
 
 ## Configuration
 
-### Deployment Config (`devtools/deployConfig.ts`)
+### Deployment Config (`packages/hardhat/devtools/deployConfig.ts`)
 
 Controls which contracts deploy on which chains:
 
@@ -335,7 +356,7 @@ const HUB_EID = EndpointId.HEDERA_V2_TESTNET
 const SPOKE_EIDS = [EndpointId.BASESEP_V2_TESTNET]
 ```
 
-### LayerZero Mesh Configs (`config/`)
+### LayerZero Mesh Configs (`packages/hardhat/config/`)
 
 Each config file defines a "mesh" - a pair of contracts that can communicate:
 

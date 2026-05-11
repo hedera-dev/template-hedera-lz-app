@@ -1,6 +1,6 @@
 {
   "name": "template-hedera-lz-app",
-  "description": "LayerZero on Hedera template (demo compatibility mode)",
+  "description": "LayerZero on Hedera vault and ETF auto-invest template",
   "version": "0.1.0",
   "create-scaffold-hbar": {
     "capabilities": {
@@ -16,9 +16,9 @@
     "outro": {
       "installCommand": "pnpm install",
       "steps": [
-        "+Demo-fast note",
+        "+Template setup note",
         "Use this template with pnpm at the project root.",
-        "Follow README_v3.md to set up env values, deploy contracts, wire paths, and run the template frontend."
+        "Use README_v3.md for deploy/wire/send steps and RUNBOOK.md for frontend runtime and ops checks."
       ]
     }
   }

@@ -1,13 +1,3 @@
-import { createMeshConfig } from './shared'
+import config from '../packages/hardhat/config/layerzero.asset.config'
 
-/**
- * Asset OFT mesh configuration
- * Used for: Chapter 1 cross-chain transfers & OVault asset flows
- *
- * Hedera (hub): MyHTSConnector - wraps native ETH to HTS token
- * Base (spoke): MyNativeOFTAdapter - adapts native ETH for LayerZero
- */
-export default createMeshConfig({
-    hedera: { contractName: 'MyHTSConnector' },
-    base: { contractName: 'MyNativeOFTAdapter' },
-})
+export default config
