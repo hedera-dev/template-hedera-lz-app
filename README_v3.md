@@ -246,7 +246,34 @@ pnpm hardhat lz:deploy --tags chapter3
 pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.share.strategy.config.ts
 ```
 
-### Step 4: Deposit with Auto-Invest
+### Step 4: Set Strategy Ownership (Required Before Sending)
+
+`MyERC4626Strategy` calls `HederaEtfStrategy.invest(...)` during deposit, and `invest` is `onlyOwner`.
+Before sending your first Chapter 3 deposit, transfer `HederaEtfStrategy` ownership to `MyERC4626Strategy`.
+
+```bash
+# Resolve addresses from deployment artifacts (prevents manual address mix-ups)
+export STRATEGY_ADDRESS=$(node -p "require('./deployments/hedera-testnet/HederaEtfStrategy.json').address")
+export VAULT_STRATEGY_ADDRESS=$(node -p "require('./deployments/hedera-testnet/MyERC4626Strategy.json').address")
+
+# Optional sanity check
+cast call "$STRATEGY_ADDRESS" "owner()(address)" --rpc-url $RPC_URL_HEDERA_TESTNET
+
+# Required: strategy owner must be the strategy vault
+cast send "$STRATEGY_ADDRESS" \
+  "transferOwnership(address)" "$VAULT_STRATEGY_ADDRESS" \
+  --rpc-url $RPC_URL_HEDERA_TESTNET \
+  --private-key $PRIVATE_KEY
+
+# Verify
+cast call "$STRATEGY_ADDRESS" "owner()(address)" --rpc-url $RPC_URL_HEDERA_TESTNET
+```
+
+Address guardrails:
+- `STRATEGY_ADDRESS` = `HederaEtfStrategy` (not composer, not OFT)
+- `VAULT_STRATEGY_ADDRESS` = `MyERC4626Strategy` (not `MyERC4626`)
+
+### Step 5: Deposit with Auto-Invest
 
 Send assets from Base, triggering auto-invest into the 50/50 basket:
 
@@ -339,6 +366,10 @@ cast balance <MY_NATIVE_OFT_ADAPTER_ADDRESS> --rpc-url $RPC_URL_BASE_SEPOLIA
 ### "Insufficient funds for gas"
 
 Hedera operations require HBAR. Fund your account at the [Hedera Portal](https://portal.hedera.com/).
+
+### "Chapter 3 deposit fails with HTS: Transfer failed, INSUFFICIENT_TOKEN_BALANCE"
+
+If this appears during Chapter 3 compose, make sure you completed **Chapter 3 → Step 4: Set Strategy Ownership** before running the send command.
 
 ### "LayerZero endpoint not found"
 

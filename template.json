@@ -18,7 +18,7 @@
       "steps": [
         "+Demo-fast note",
         "Use this template with pnpm at the project root.",
-        "Follow TEMPLATE_RUNBOOK.md to set up env values, deploy contracts, wire paths, and run the template frontend."
+        "Follow README_v3.md to set up env values, deploy contracts, wire paths, and run the template frontend."
       ]
     }
   }

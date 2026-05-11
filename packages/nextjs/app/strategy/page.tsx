@@ -1,9 +1,13 @@
 "use client";
 
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 import { useVaultState } from "~~/hooks/lz-app";
 
 const formatEthValue = (value?: bigint) => (value !== undefined ? formatEther(value) : "-");
+const formatTokenValue = (value?: bigint, decimals?: number) => {
+  if (value === undefined || decimals === undefined) return "-";
+  return formatUnits(value, decimals);
+};
 const formatCount = (value?: number) => (value === undefined ? "-" : value.toString());
 const WAD = 10n ** 18n;
 
@@ -21,15 +25,26 @@ const formatSharePrice = (assets?: bigint, supply?: bigint) => {
 };
 
 export default function StrategyPage() {
-  const { totalAssets, totalSupply, userShares, investedAssets, strategyAddress, strategyHustlers, strategyHbar, strategyActivity } =
-    useVaultState();
+  const {
+    totalAssets,
+    totalSupply,
+    userShares,
+    investedAssets,
+    strategyAddress,
+    hustlersDecimals,
+    strategyHustlers,
+    strategyHbar,
+    strategyActivity,
+  } = useVaultState();
 
   const assets = formatEthValue(totalAssets.data as bigint | undefined);
   const supply = formatEthValue(totalSupply.data as bigint | undefined);
   const shares = formatEthValue(userShares.data as bigint | undefined);
   const sharePrice = formatSharePrice(totalAssets.data as bigint | undefined, totalSupply.data as bigint | undefined);
   const invested = formatEthValue(investedAssets.data as bigint | undefined);
-  const stratHustlers = formatEthValue(strategyHustlers.data as bigint | undefined);
+  const hustlersDecimalsValue =
+    typeof hustlersDecimals.data === "number" ? hustlersDecimals.data : Number(hustlersDecimals.data ?? 6);
+  const stratHustlers = formatTokenValue(strategyHustlers.data as bigint | undefined, hustlersDecimalsValue);
   const stratHbar = strategyHbar.data?.formatted || "-";
   const investedEvents = strategyActivity.data?.investedCount;
   const divestedEvents = strategyActivity.data?.divestedCount;

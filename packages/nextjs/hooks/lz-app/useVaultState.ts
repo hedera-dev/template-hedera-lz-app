@@ -12,6 +12,31 @@ const INVESTED_EVENT = parseAbiItem(
 const DIVESTED_EVENT = parseAbiItem(
   "event Divested(address indexed caller, uint256 hbarIn, uint256 hustlersIn, uint256 assetOut)",
 );
+const STRATEGY_HUSTLERS_ABI = [
+  {
+    inputs: [],
+    name: "hustlers",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+const ERC20_READ_ABI = [
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
 
 export const useVaultState = () => {
   const { address } = useAccount();
@@ -50,12 +75,48 @@ export const useVaultState = () => {
     query: { refetchInterval: 10_000 },
   });
   const strategyEvm = strategyAddress.data as `0x${string}` | undefined;
-  const strategyHustlers = useScaffoldReadContract({
-    contractName: "Hustlers",
-    chainId,
-    functionName: "balanceOf",
-    args: [strategyEvm],
-    query: { enabled: Boolean(strategyEvm), refetchInterval: 10_000 },
+  const hustlersToken = useQuery({
+    queryKey: ["strategy-hustlers-token", chainId, strategyEvm],
+    enabled: Boolean(hederaClient && strategyEvm),
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      if (!hederaClient || !strategyEvm) return undefined;
+      return (await hederaClient.readContract({
+        address: strategyEvm,
+        abi: STRATEGY_HUSTLERS_ABI,
+        functionName: "hustlers",
+      })) as `0x${string}`;
+    },
+  });
+  const hustlersTokenAddress = hustlersToken.data;
+  const strategyHustlers = useQuery({
+    queryKey: ["strategy-hustlers-balance", chainId, strategyEvm, hustlersTokenAddress],
+    enabled: Boolean(hederaClient && strategyEvm && hustlersTokenAddress),
+    refetchInterval: 10_000,
+    queryFn: async () => {
+      if (!hederaClient || !strategyEvm || !hustlersTokenAddress) return 0n;
+      return (await hederaClient.readContract({
+        address: hustlersTokenAddress,
+        abi: ERC20_READ_ABI,
+        functionName: "balanceOf",
+        args: [strategyEvm],
+      })) as bigint;
+    },
+  });
+  const hustlersDecimals = useQuery({
+    queryKey: ["strategy-hustlers-decimals", chainId, hustlersTokenAddress],
+    enabled: Boolean(hederaClient && hustlersTokenAddress),
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      if (!hederaClient || !hustlersTokenAddress) return 18;
+      return Number(
+        await hederaClient.readContract({
+          address: hustlersTokenAddress,
+          abi: ERC20_READ_ABI,
+          functionName: "decimals",
+        }),
+      );
+    },
   });
   const strategyHbar = useBalance({
     chainId,
@@ -93,6 +154,7 @@ export const useVaultState = () => {
     userShares,
     investedAssets,
     strategyAddress,
+    hustlersDecimals,
     strategyHustlers,
     strategyHbar,
     strategyActivity,
