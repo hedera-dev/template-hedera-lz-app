@@ -48,27 +48,12 @@ pnpm install
 
 # Set up environment
 cp .env.example .env
-# Edit .env with your private key
+cp packages/nextjs/.env.example packages/nextjs/.env.local
+# Edit .env and packages/nextjs/.env.local with required values
 
 # Compile contracts
-pnpm compile
+pnpm hardhat:compile
 ```
-
-## Frontend Runtime (After Deploy/Wire)
-
-When you redeploy contracts, regenerate frontend contract bindings before running the app:
-
-```bash
-# Rebuild deployed contracts mapping from hardhat deployments/*
-pnpm next:gen-contracts
-
-# Start the frontend
-pnpm next:dev
-```
-
-Then open `http://localhost:3000`.
-
-For operational frontend checks and relayer notes, see `RUNBOOK.md`.
 
 ---
 
@@ -121,7 +106,7 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 pnpm hardhat lz:oft:send \
   --src-eid 40245 \
   --dst-eid 40285 \
-  --amount 0.01 \
+  --amount 0.02 \
   --to 0xYOUR_ADDRESS \
   --simple-workers
 ```
@@ -306,6 +291,22 @@ pnpm hardhat lz:ovault:send \
   --lz-compose-gas 7000000 \
   --share-oapp-config config/layerzero.share.strategy.config.ts
 ```
+
+## Frontend Runtime (After Deploy/Wire)
+
+After completing contract deployment and wiring, regenerate frontend contract bindings and run the app:
+
+```bash
+# Rebuild deployed contracts mapping from hardhat deployments/*
+pnpm next:gen-contracts
+
+# Start the frontend
+pnpm next:dev
+```
+
+Then open `http://localhost:3000`.
+
+For operational frontend checks and relayer notes, see `RUNBOOK.md`.
 
 ---
 

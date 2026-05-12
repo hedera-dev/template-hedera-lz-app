@@ -12,16 +12,17 @@
   },
   "scripts": {
     "clean": "rm -rf artifacts cache out",
-    "compile": "$npm_execpath run compile:hardhat",
-    "compile:hardhat": "pnpm hardhat compile",
+    "hardhat:compile": "pnpm hardhat compile",
+    "hardhat:test": "pnpm hardhat test",
+    "hardhat:clean": "pnpm hardhat clean",
     "lint": "$npm_execpath run lint:js && $npm_execpath run lint:sol",
     "lint:fix": "eslint --fix '**/*.{js,ts,json}' && prettier --write . && solhint 'packages/hardhat/contracts/**/*.sol' --fix --noPrompt",
     "lint:js": "eslint '**/*.{js,ts,json}' && prettier --check .",
     "lint:sol": "solhint 'packages/hardhat/contracts/**/*.sol'",
-    "test": "$npm_execpath run test:hardhat",
-    "test:hardhat": "pnpm hardhat test",
     "next:dev": "$npm_execpath --filter @sh/nextjs run dev",
     "next:build": "$npm_execpath --filter @sh/nextjs run build",
+    "next:start": "$npm_execpath --filter @sh/nextjs run start",
+    "next:lint": "$npm_execpath --filter @sh/nextjs run lint",
     "next:gen-contracts": "$npm_execpath --filter @sh/nextjs run gen:contracts"
   },
   "resolutions": {

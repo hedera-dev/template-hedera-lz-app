@@ -11,4 +11,4 @@ Key directories:
 - `devtools/`
 - `test/`
 
-Use root scripts (for example `pnpm compile` or `pnpm hardhat ...`) from repository root.
+Use root scripts (for example `pnpm hardhat:compile` or `pnpm hardhat ...`) from repository root.

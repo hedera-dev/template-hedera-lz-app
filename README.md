@@ -18,7 +18,7 @@ This template is consumed by `create-scaffold-hbar` as an external template bran
 ```bash
 pnpm install
 cp .env.example .env
-pnpm compile
+pnpm hardhat:compile
 pnpm next:gen-contracts
 pnpm next:dev
 ```

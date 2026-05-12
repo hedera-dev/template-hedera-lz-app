@@ -1,8 +1,13 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
-const deploymentsRoot = path.join(__dirname, '..', 'deployments')
+const deploymentRoots = [
+    // Preferred location after moving hardhat sources into packages/hardhat
+    path.join(__dirname, '..', '..', '..', 'deployments'),
+    // Backward compatibility for older layout/tests
+    path.join(__dirname, '..', 'deployments'),
+]
 
 const deploymentFolderByEid: Record<number, string> = {
     [EndpointId.BASESEP_V2_TESTNET]: 'base-sepolia',
@@ -15,7 +20,17 @@ export const loadDeploymentAddress = (eid: number, contractName: string): string
         throw new Error(`No deployment folder configured for eid ${eid}`)
     }
 
-    const deploymentPath = path.join(deploymentsRoot, networkFolder, `${contractName}.json`)
+    const deploymentPath = deploymentRoots
+        .map((root) => path.join(root, networkFolder, `${contractName}.json`))
+        .find((candidate) => existsSync(candidate))
+
+    if (!deploymentPath) {
+        throw new Error(
+            `Missing deployment for ${contractName} (${networkFolder}). Tried:\n${deploymentRoots
+                .map((root) => path.join(root, networkFolder, `${contractName}.json`))
+                .join('\n')}`
+        )
+    }
     const deploymentRaw = readFileSync(deploymentPath, 'utf8')
     const deployment = JSON.parse(deploymentRaw)
     if (!deployment.address) {
