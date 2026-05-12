@@ -1,6 +1,7 @@
 import fs from 'fs'
 
 import { BigNumber, Contract } from 'ethers'
+import { createLogger } from '@layerzerolabs/io-devtools'
 import { task, types } from 'hardhat/config'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
@@ -26,6 +27,7 @@ const ASSOCIATION_ABI = ['function associate()']
 const CONFIG_PATH = 'env/addresses.testnet.json'
 const NETWORK_KEY = 'hedera-testnet'
 const MIRROR_NODE_URL = 'https://testnet.mirrornode.hedera.com'
+const logger = createLogger()
 
 task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH/HUSTLERS')
     .addOptionalParam('hbarLiquidityWei', 'HBAR liquidity (wei-like, 1e18)', '10000000000000000000', types.string) // defaults to 10 HBAR
@@ -103,13 +105,13 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 ? BigNumber.from(args.poolCreateFeeWei)
                 : computedPoolFeeWei
 
-        console.log('pairCreateFee (tinycent):', feeTinycent.toString())
-        console.log(
+        logger.info(`pairCreateFee (tinycent): ${feeTinycent.toString()}`)
+        logger.info(
             'exchange rate (cent_equivalent/hbar_equivalent):',
             `${centEquivalent.toString()}/${hbarEquivalent.toString()}`
         )
-        console.log('raw pool fee (wei-like):', rawPoolFeeWei.toString())
-        console.log('effective pool fee (wei-like):', poolFeeWei.toString())
+        logger.info(`raw pool fee (wei-like): ${rawPoolFeeWei.toString()}`)
+        logger.info(`effective pool fee (wei-like): ${poolFeeWei.toString()}`)
 
         const hbarLiquidityWei = BigNumber.from(args.hbarLiquidityWei)
         const wethLiquidity = BigNumber.from(args.wethLiquidity)
@@ -145,7 +147,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                     throw error
                 }
 
-                console.warn(`${label}: deployer is not associated. Attempting token association and retry...`)
+                logger.warn(`${label}: deployer is not associated. Attempting token association and retry...`)
                 const associationToken = new Contract(tokenAddress, ASSOCIATION_ABI, signer)
                 try {
                     await (
@@ -154,16 +156,16 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                             gasPrice: effectiveGasPrice,
                         })
                     ).wait()
-                    console.log(`${label}: association successful`)
+                    logger.info(`${label}: association successful`)
                 } catch (associateError) {
                     if (!hasErrorText(associateError, 'TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT')) {
                         throw associateError
                     }
-                    console.log(`${label}: already associated`)
+                    logger.info(`${label}: already associated`)
                 }
 
                 await (await token.approve(spender, amount)).wait()
-                console.log(`${label}: approve successful after association recovery`)
+                logger.info(`${label}: approve successful after association recovery`)
             }
         }
 
@@ -199,10 +201,10 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
 
         const totalHbar = poolFeeWei.add(hbarLiquidityWei)
         const signerBalance = await signer.getBalance()
-        console.log('signer balance (wei-like):', signerBalance.toString())
-        console.log('required for first tx value (wei-like):', totalHbar.toString())
-        console.log('provider gasPrice (wei):', providerGasPrice.toString())
-        console.log('effective gasPrice (wei):', effectiveGasPrice.toString())
+        logger.info(`signer balance (wei-like): ${signerBalance.toString()}`)
+        logger.info(`required for first tx value (wei-like): ${totalHbar.toString()}`)
+        logger.info(`provider gasPrice (wei): ${providerGasPrice.toString()}`)
+        logger.info(`effective gasPrice (wei): ${effectiveGasPrice.toString()}`)
 
         let routerWrappedNativeContract = ''
         try {
@@ -214,9 +216,9 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 // Router may not expose wrapped-native contract getter in all deployments.
             }
         }
-        console.log('configured WHBAR token (pair token):', addresses.whbarToken)
+        logger.info(`configured WHBAR token (pair token): ${addresses.whbarToken}`)
         if (routerWrappedNativeContract) {
-            console.log('router wrapped native contract:', routerWrappedNativeContract)
+            logger.info(`router wrapped native contract: ${routerWrappedNativeContract}`)
         }
 
         const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
@@ -233,11 +235,11 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
         const ensurePair = async (tokenA: string, tokenB: string, createFeeWei: BigNumber, label: string): Promise<string> => {
             let pair = await factory.getPair(tokenA, tokenB)
             if (pair !== ZERO_ADDRESS) {
-                console.log(`${label}: existing pair found ${pair}`)
+                logger.info(`${label}: existing pair found ${pair}`)
                 return pair
             }
 
-            console.log(`${label}: pair missing, creating via factory.createPair...`)
+            logger.info(`${label}: pair missing, creating via factory.createPair...`)
             const createPairTx = await factory.createPair(tokenA, tokenB, {
                 value: createFeeWei,
                 gasLimit: maxTxGasLimit,
@@ -248,7 +250,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
             if (pair === ZERO_ADDRESS) {
                 throw new Error(`${label}: createPair tx mined but pair still missing`)
             }
-            console.log(`${label}: pair created ${pair} tx=${createPairReceipt.transactionHash}`)
+            logger.info(`${label}: pair created ${pair} tx=${createPairReceipt.transactionHash}`)
             return pair
         }
 
@@ -269,7 +271,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 }
             )
         } catch (e) {
-            console.warn('estimateGas(addLiquidityETH) failed; using fallback gas limit.', (e as Error).message)
+            logger.warn(`estimateGas(addLiquidityETH) failed; using fallback gas limit. ${(e as Error).message}`)
             addLiquidityETHGas = fallbackGasLimit.gt(maxTxGasLimit) ? maxTxGasLimit : fallbackGasLimit
         }
         const addLiquidityEthGasLimit = resolveGasLimit(addLiquidityETHGas)
@@ -279,7 +281,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
             gasPrice: effectiveGasPrice,
         })
         const wethHbarReceipt = await wethHbarTx.wait()
-        console.log(`WETH/HBAR: added liquidity pair=${wethHbarPair} tx=${wethHbarReceipt.transactionHash}`)
+        logger.info(`WETH/HBAR: added liquidity pair=${wethHbarPair} tx=${wethHbarReceipt.transactionHash}`)
 
         const wethHustlersPair = await ensurePair(wethToken, addresses.hustlersToken, poolFeeWei, 'WETH/HUSTLERS')
 
@@ -296,7 +298,7 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
                 deadline
             )
         } catch (e) {
-            console.warn('estimateGas(addLiquidity) failed; using fallback gas limit.', (e as Error).message)
+            logger.warn(`estimateGas(addLiquidity) failed; using fallback gas limit. ${(e as Error).message}`)
             addLiquidityGas = fallbackGasLimit.gt(maxTxGasLimit) ? maxTxGasLimit : fallbackGasLimit
         }
         const addLiquidityGasLimit = resolveGasLimit(addLiquidityGas)
@@ -312,5 +314,5 @@ task('lz:setup:create-pools', 'Create SaucerSwap V1 pools for WETH/HBAR and WETH
             { gasLimit: addLiquidityGasLimit, gasPrice: effectiveGasPrice }
         )
         const wethHustlersReceipt = await wethHustlersTx.wait()
-        console.log(`WETH/HUSTLERS: added liquidity pair=${wethHustlersPair} tx=${wethHustlersReceipt.transactionHash}`)
+        logger.info(`WETH/HUSTLERS: added liquidity pair=${wethHustlersPair} tx=${wethHustlersReceipt.transactionHash}`)
     })
