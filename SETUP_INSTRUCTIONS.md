@@ -106,7 +106,7 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 pnpm hardhat lz:oft:send \
   --src-eid 40245 \
   --dst-eid 40285 \
-  --amount 0.02 \
+  --amount 0.05 \
   --to 0xYOUR_ADDRESS \
   --simple-workers
 ```
@@ -192,20 +192,6 @@ pnpm hardhat lz:ovault:send \
   --simple-workers
 ```
 
-### Step 5: Redeem Shares
-
-Redeem shares back to assets:
-
-```bash
-pnpm hardhat lz:ovault:send \
-  --src-eid 40285 \
-  --dst-eid 40245 \
-  --amount 0.001 \
-  --to 0xYOUR_ADDRESS \
-  --token-type share \
-  --simple-workers
-```
-
 ---
 
 ## Chapter 3: ETF Strategy Vault
@@ -253,6 +239,8 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.share.strategy.config.t
 Before sending your first Chapter 3 deposit, transfer `HederaEtfStrategy` ownership to `MyERC4626Strategy`.
 
 ```bash
+# Export .env vars variables in the terminal context:
+source .env
 # Resolve addresses from deployment artifacts (prevents manual address mix-ups)
 export STRATEGY_ADDRESS=$(node -p "require('./deployments/hedera-testnet/HederaEtfStrategy.json').address")
 export VAULT_STRATEGY_ADDRESS=$(node -p "require('./deployments/hedera-testnet/MyERC4626Strategy.json').address")
