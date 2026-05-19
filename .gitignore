@@ -14,7 +14,7 @@ deployments
 # LayerZero specific files
 .layerzero
 
-# foundry test compilation files
+# Contract build outputs
 out
 
 # pnpm

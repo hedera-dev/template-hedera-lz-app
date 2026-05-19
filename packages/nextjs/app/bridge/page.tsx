@@ -1,0 +1,749 @@
+"use client";
+
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { formatEther, parseEther } from "viem";
+import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
+import { useAccount, useSwitchChain, useWaitForTransactionReceipt } from "wagmi";
+import {
+  useBridgeQuote,
+  useBridgeRelayer,
+  useBridgeSend,
+  useLayerZeroScanLink,
+  usePendingMessages,
+  useProcessReceive,
+} from "~~/hooks/lz-app";
+
+type PendingBridgeMessage = {
+  nonce: bigint;
+  amount: string;
+  recipient: `0x${string}`;
+  srcOftAddress: `0x${string}`;
+  dstOftAddress: `0x${string}`;
+};
+
+type ProcessTimeline = {
+  verifyHash?: `0x${string}`;
+  commitExecuteHash?: `0x${string}`;
+  composeHash?: `0x${string}`;
+};
+
+type CatchUpStatus = {
+  isProcessing: boolean;
+  currentNonce: bigint | null;
+  processedCount: number;
+  totalCount: number;
+  errors: string[];
+};
+
+const BASE_CHAIN_ID = 84532;
+const HEDERA_CHAIN_ID = 296;
+const BASE_EID = 40245;
+const HEDERA_EID = 40285;
+const HEDERA_TINYBAR_TO_WEIBAR = 10_000_000_000n;
+
+const CHAIN_META = {
+  base: { label: "Base Sepolia", shortLabel: "Base", token: "ETH", explorerName: "BaseScan" },
+  hedera: { label: "Hedera Testnet", shortLabel: "Hedera", token: "WETH-HTS", explorerName: "HashScan" },
+} as const;
+
+const StatusBadge = ({ status }: { status: string }) => (
+  <span
+    className={`badge gap-1 ${
+      status === "success"
+        ? "badge-success"
+        : status === "error"
+          ? "badge-error"
+          : status === "pending"
+            ? "badge-warning"
+            : "badge-ghost"
+    }`}
+  >
+    {status === "pending" ? <span className="loading loading-spinner loading-xs" /> : null}
+    {status}
+  </span>
+);
+
+const LoadingText = ({ children }: { children: ReactNode }) => (
+  <span className="inline-flex items-center gap-2">
+    <span className="loading loading-spinner loading-sm" />
+    {children}
+  </span>
+);
+
+const StepDot = ({ status }: { status: string }) => (
+  <span
+    className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+      status === "success"
+        ? "bg-success text-success-content"
+        : status === "error"
+          ? "bg-error text-error-content"
+          : status === "pending"
+            ? "bg-warning text-warning-content"
+            : "bg-base-300 text-base-content/70"
+    }`}
+  >
+    {status === "success" ? "✓" : status === "pending" ? "…" : "•"}
+  </span>
+);
+
+export default function BridgePage() {
+  const [amount, setAmount] = useState("0.001");
+  const [fromChain, setFromChain] = useState<"base" | "hedera">("base");
+  const [toChain, setToChain] = useState<"base" | "hedera">("hedera");
+  const [submittedTxHash, setSubmittedTxHash] = useState<`0x${string}` | undefined>();
+  const [processTimeline, setProcessTimeline] = useState<ProcessTimeline>({});
+  const [bridgeError, setBridgeError] = useState("");
+  const [processError, setProcessError] = useState("");
+  const [processLog, setProcessLog] = useState("");
+  const [processCompleted, setProcessCompleted] = useState(false);
+  const [processInFlight, setProcessInFlight] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<PendingBridgeMessage | undefined>();
+  const [showCatchUp, setShowCatchUp] = useState(false);
+  const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
+  const [pendingInfo, setPendingInfo] = useState<{
+    pendingMessages: Array<{ nonce: bigint; recipient: `0x${string}`; amountLD: string }>;
+    nextNonce: bigint;
+    latestOutboundNonce: bigint;
+    pendingCount: number;
+  } | null>(null);
+  const [catchUpStatus, setCatchUpStatus] = useState<CatchUpStatus>({
+    isProcessing: false,
+    currentNonce: null,
+    processedCount: 0,
+    totalCount: 0,
+    errors: [],
+  });
+  const { chainId, address } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
+  const sourceChainId = fromChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const destinationChainId = toChain === "base" ? BASE_CHAIN_ID : HEDERA_CHAIN_ID;
+  const srcEid = fromChain === "base" ? BASE_EID : HEDERA_EID;
+  const dstEid = toChain === "base" ? BASE_EID : HEDERA_EID;
+  const sourceMeta = CHAIN_META[fromChain];
+  const destinationMeta = CHAIN_META[toChain];
+  const isSourceChain = chainId === sourceChainId;
+  const isDestinationChain = chainId === destinationChainId;
+  const routeSupported = fromChain !== toChain;
+  const quote = useBridgeQuote(amount, { fromChain, toChain });
+  const bridge = useBridgeSend({ fromChain, toChain });
+  const relayer = useBridgeRelayer();
+  const processReceive = useProcessReceive(destinationChainId as 296 | 84532);
+  const pendingMessages = usePendingMessages({ fromChain, toChain });
+  const sourceReceipt = useWaitForTransactionReceipt({
+    chainId: sourceChainId,
+    hash: submittedTxHash,
+    query: { enabled: Boolean(submittedTxHash) },
+  });
+  const amountWei = (() => {
+    try {
+      return parseEther(amount || "0");
+    } catch {
+      return 0n;
+    }
+  })();
+  const amountOutEstimate = amountWei;
+  const contractMsgValue = quote.fee + (fromChain === "base" ? amountWei : 0n);
+  const walletTxValue = fromChain === "hedera" ? contractMsgValue * HEDERA_TINYBAR_TO_WEIBAR : contractMsgValue;
+  const lzLink = useLayerZeroScanLink(submittedTxHash, sourceChainId);
+  const processSucceeded = Boolean(processTimeline.commitExecuteHash && processCompleted);
+  /** Source tx is submitted — wallet chain may no longer match source; still treat Phase 1 as started. */
+  const sourceSendSubmitted = Boolean(submittedTxHash) && !processSucceeded;
+  const hasStartedFlow = Boolean(submittedTxHash || pendingMessage || processTimeline.verifyHash || processTimeline.commitExecuteHash);
+  const sourceStepStatus = !submittedTxHash ? "idle" : sourceReceipt.isSuccess ? "success" : sourceReceipt.isError ? "error" : "pending";
+  const verifyStepStatus = !submittedTxHash
+    ? "idle"
+    : processTimeline.verifyHash
+      ? "success"
+      : processInFlight || processReceive.isPending
+        ? "pending"
+        : "idle";
+  const commitStepStatus = !submittedTxHash
+    ? "idle"
+    : processTimeline.commitExecuteHash && processCompleted
+      ? "success"
+      : processTimeline.commitExecuteHash || processInFlight || processReceive.isPending
+        ? "pending"
+        : "idle";
+  const userFacingProcessError = useMemo(() => {
+    if (!processError) return "";
+    if (processError.includes("Position") && processError.includes("out of bounds")) {
+      return "Processing submitted, but the node returned an unreadable debug payload. Check the tx links below for confirmation.";
+    }
+    return processError;
+  }, [processError]);
+
+  useEffect(() => {
+    // Clear stale network-gated errors when wallet chain changes.
+    if (isSourceChain) setBridgeError("");
+    if (isDestinationChain) setProcessError("");
+  }, [isSourceChain, isDestinationChain]);
+
+  useEffect(() => {
+    setPendingInfo(null);
+    setShowCatchUp(false);
+  }, [fromChain, toChain]);
+
+  const onCheckPending = async () => {
+    try {
+      const info = await pendingMessages.fetchPendingMessages();
+      setPendingInfo(info);
+      setShowCatchUp(true);
+    } catch (err) {
+      setProcessError(err instanceof Error ? err.message : "Failed to fetch pending messages");
+    }
+  };
+
+  const onCatchUp = async () => {
+    if (!pendingInfo || !pendingMessages.srcOftAddress || !pendingMessages.dstOftAddress) return;
+    if (!isDestinationChain) {
+      await switchChainAsync({ chainId: destinationChainId });
+      return;
+    }
+
+    const messagesToProcess = pendingInfo.pendingMessages;
+    if (messagesToProcess.length === 0) {
+      setProcessError("No pending messages found on-chain to process");
+      return;
+    }
+
+    setCatchUpStatus({
+      isProcessing: true,
+      currentNonce: null,
+      processedCount: 0,
+      totalCount: messagesToProcess.length,
+      errors: [],
+    });
+
+    for (let i = 0; i < messagesToProcess.length; i++) {
+      const msg = messagesToProcess[i];
+      setCatchUpStatus(prev => ({ ...prev, currentNonce: msg.nonce }));
+
+      try {
+        await processReceive.process({
+          sourceChainId,
+          destinationChainId,
+          srcEid,
+          dstEid,
+          nonce: msg.nonce,
+          amount: msg.amountLD,
+          recipient: msg.recipient,
+          srcOftAddress: pendingMessages.srcOftAddress!,
+          dstOftAddress: pendingMessages.dstOftAddress!,
+        });
+
+        setCatchUpStatus(prev => ({ ...prev, processedCount: prev.processedCount + 1 }));
+      } catch (err) {
+        const errMsg = `Nonce ${msg.nonce}: ${err instanceof Error ? err.message : "Failed"}`;
+        setCatchUpStatus(prev => ({ ...prev, errors: [...prev.errors, errMsg] }));
+        break;
+      }
+    }
+
+    setCatchUpStatus(prev => ({ ...prev, isProcessing: false, currentNonce: null }));
+    const refreshed = await pendingMessages.fetchPendingMessages();
+    setPendingInfo(refreshed);
+  };
+
+  const onSend = async () => {
+    setBridgeError("");
+    if (!routeSupported) {
+      setBridgeError("Select two different chains for bridging.");
+      return;
+    }
+    if (!isSourceChain) {
+      await switchChainAsync({ chainId: sourceChainId });
+      return;
+    }
+    if (!address) {
+      setBridgeError("Connect wallet first");
+      return;
+    }
+    try {
+      const sent = await bridge.send(amount);
+      setSubmittedTxHash(sent.txHash);
+      setProcessError("");
+      setProcessLog("");
+      setProcessCompleted(false);
+      setPendingMessage({
+        nonce: sent.outboundNonce,
+        amount,
+        recipient: address,
+        srcOftAddress: sent.sourceOftAddress,
+        dstOftAddress: sent.destinationOftAddress,
+      });
+
+      // Single-signature UX: trigger destination processing via server relayer.
+      setProcessInFlight(true);
+      try {
+        const relayed = await relayer.processBridge({
+          sourceTxHash: sent.txHash,
+          srcEid: sent.srcEid,
+          dstEid: sent.dstEid,
+          nonce: sent.outboundNonce,
+          amount,
+          recipient: address,
+          srcOftAddress: sent.sourceOftAddress,
+          dstOftAddress: sent.destinationOftAddress,
+        });
+        setProcessTimeline({
+          verifyHash: relayed.verifyHash,
+          commitExecuteHash: relayed.commitExecuteHash,
+          composeHash: relayed.composeHash,
+        });
+        setProcessCompleted(true);
+        if (relayed.debug) {
+          setProcessLog(JSON.stringify(relayed.debug, null, 2));
+        }
+        // Destination processing completed; clear manual pending state.
+        setPendingMessage(undefined);
+      } catch (relayerError) {
+        const relayerErrorMessage = relayerError instanceof Error ? relayerError.message : "Unknown relayer error";
+        setProcessError(
+          `Relayer processing failed: ${relayerErrorMessage}. You can retry manually using the fallback processor below.`,
+        );
+      } finally {
+        setProcessInFlight(false);
+      }
+    } catch (error) {
+      setBridgeError(error instanceof Error ? error.message : "Bridge send failed");
+    }
+  };
+
+  const onProcess = async () => {
+    setProcessError("");
+    setProcessLog("");
+    setProcessCompleted(false);
+    setProcessInFlight(true);
+    if (!isDestinationChain) {
+      await switchChainAsync({ chainId: destinationChainId });
+      setProcessInFlight(false);
+      return;
+    }
+    if (!pendingMessage) {
+      setProcessError("No pending message to process");
+      setProcessInFlight(false);
+      return;
+    }
+    try {
+      const processed = await processReceive.process({
+        sourceChainId,
+        destinationChainId,
+        srcEid,
+        dstEid,
+        nonce: pendingMessage.nonce,
+        amount: pendingMessage.amount,
+        recipient: pendingMessage.recipient,
+        srcOftAddress: pendingMessage.srcOftAddress,
+        dstOftAddress: pendingMessage.dstOftAddress,
+      });
+      setProcessTimeline({
+        verifyHash: processed.verifyHash,
+        commitExecuteHash: processed.commitExecuteHash,
+        composeHash: processed.composeHash,
+      });
+      setProcessCompleted(true);
+      setProcessLog(JSON.stringify(processed.debug, null, 2));
+    } catch (error) {
+      setProcessError(error instanceof Error ? error.message : "Processing failed");
+    } finally {
+      setProcessInFlight(false);
+    }
+  };
+
+  const sourceTxLink = submittedTxHash
+    ? sourceChainId === BASE_CHAIN_ID
+      ? `https://sepolia.basescan.org/tx/${submittedTxHash}`
+      : `https://hashscan.io/testnet/tx/${submittedTxHash}`
+    : "";
+  const destinationTxBase = destinationChainId === BASE_CHAIN_ID ? "https://sepolia.basescan.org/tx/" : "https://hashscan.io/testnet/tx/";
+  const verifyLink = processTimeline.verifyHash ? `${destinationTxBase}${processTimeline.verifyHash}` : "";
+  const commitLink = processTimeline.commitExecuteHash ? `${destinationTxBase}${processTimeline.commitExecuteHash}` : "";
+  const composeLink = processTimeline.composeHash ? `https://hashscan.io/testnet/tx/${processTimeline.composeHash}` : "";
+  const resetBridgeFlow = () => {
+    setSubmittedTxHash(undefined);
+    setProcessTimeline({});
+    setBridgeError("");
+    setProcessError("");
+    setProcessLog("");
+    setProcessCompleted(false);
+    setProcessInFlight(false);
+    setPendingMessage(undefined);
+    setPendingInfo(null);
+    setShowCatchUp(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold">Bridge (Chapter 1)</h1>
+      <div className="card bg-base-200 p-4 rounded-xl space-y-4 border border-base-300">
+        <div className="card bg-base-100 border border-base-300 rounded-xl p-4 space-y-5 overflow-hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Bridge Route</div>
+              <div className="text-xs text-base-content/60">
+                {sourceMeta.label} to {destinationMeta.label}
+              </div>
+            </div>
+            <div className="badge badge-outline badge-sm">OFT Bridge</div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 items-end">
+            <label className="form-control">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">From chain</span>
+              <div className="h-12 rounded-xl border border-base-300 bg-base-200/60 px-3 flex items-center">
+                <select
+                  className="w-full bg-transparent border-0 outline-none text-base font-medium"
+                  value={fromChain}
+                  onChange={(e) => {
+                    const nextFrom = e.target.value as "base" | "hedera";
+                    setFromChain(nextFrom);
+                    setToChain(nextFrom === "base" ? "hedera" : "base");
+                  }}
+                >
+                  <option value="base">Base Sepolia</option>
+                  <option value="hedera">Hedera Testnet</option>
+                </select>
+              </div>
+            </label>
+            <button
+              className="btn btn-circle btn-ghost btn-sm mb-1 border border-base-300 self-end bg-base-200/60"
+              onClick={() => {
+                const nextFrom = toChain;
+                const nextTo = fromChain;
+                setFromChain(nextFrom);
+                setToChain(nextTo);
+              }}
+              type="button"
+              aria-label="Swap chains"
+            >
+              ⇅
+            </button>
+            <label className="form-control">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">To chain</span>
+              <div className="h-12 rounded-xl border border-base-300 bg-base-200/60 px-3 flex items-center">
+                <select
+                  className="w-full bg-transparent border-0 outline-none text-base font-medium"
+                  value={toChain}
+                  onChange={(e) => {
+                    const nextTo = e.target.value as "base" | "hedera";
+                    setToChain(nextTo);
+                    setFromChain(nextTo === "base" ? "hedera" : "base");
+                  }}
+                >
+                  <option value="base">Base Sepolia</option>
+                  <option value="hedera">Hedera Testnet</option>
+                </select>
+              </div>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">You send</span>
+              <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
+                <input
+                  className="input input-ghost h-10 px-0 text-lg font-semibold focus:outline-none min-w-0"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+                <span className="text-sm font-medium text-base-content/60">{sourceMeta.token}</span>
+              </div>
+            </label>
+            <div className="form-control bg-base-200/50 border border-base-300 rounded-xl px-3 py-2">
+              <span className="label-text text-[11px] uppercase tracking-wide text-base-content/60">Estimated receive</span>
+              <div className="h-10 grid grid-cols-[1fr_auto] items-center gap-2">
+                <span className="text-lg font-semibold text-base-content/85">{formatEther(amountOutEstimate)}</span>
+                <span className="text-sm font-medium text-base-content/60">{destinationMeta.token}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-base-300 bg-base-200/30 px-3 py-2">
+            <p className="text-xs text-base-content/65">
+              Submit once on {sourceMeta.shortLabel}. Destination execution is finalized by relayer.
+            </p>
+            <button
+              className="btn btn-primary btn-sm rounded-lg px-4 whitespace-nowrap"
+              onClick={onSend}
+              disabled={bridge.isPending || sourceSendSubmitted || processInFlight}
+            >
+              {bridge.isPending ? (
+                <LoadingText>{fromChain === "hedera" ? "Approve + send" : "Sending..."}</LoadingText>
+              ) : processInFlight ? (
+                <LoadingText>Finalizing...</LoadingText>
+              ) : sourceSendSubmitted ? (
+                `Submitted (${sourceMeta.shortLabel})`
+              ) : routeSupported ? (
+                isSourceChain ? (
+                  `Bridge to ${destinationMeta.shortLabel}`
+                ) : (
+                  `Switch to ${sourceMeta.shortLabel}`
+                )
+              ) : (
+                "Route unavailable"
+              )}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
+            <span className="text-base-content/60">LayerZero fee</span>{" "}
+            <span className="font-medium">
+              {quote.isLoading || quote.isFetching ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="loading loading-spinner loading-xs" />
+                  quoting
+                </span>
+              ) : fromChain === "hedera" ? (
+                `${quote.fee.toString()} tinybar`
+              ) : (
+                `${formatEther(quote.fee)} ETH`
+              )}
+            </span>
+          </div>
+          <div className="bg-base-100 border border-base-300 rounded-lg px-3 py-2">
+            <span className="text-base-content/60">Wallet transaction value</span>{" "}
+            <span className="font-medium">
+              {quote.isLoading || quote.isFetching
+                ? "..."
+                : `${formatEther(walletTxValue)} ${fromChain === "hedera" ? "HBAR" : "ETH"}`}
+            </span>
+          </div>
+        </div>
+        <p className="text-xs text-base-content/60">
+          Quote status: {quote.isFetching ? "refreshing" : quote.isLoading ? "loading" : quote.ok ? "ready" : "error"}
+          {quote.updatedAt ? ` - updated ${new Date(quote.updatedAt).toLocaleTimeString()}` : ""}
+        </p>
+        {!routeSupported ? (
+          <div className="alert alert-warning text-sm">Select two different chains for bridging.</div>
+        ) : !isSourceChain && !sourceSendSubmitted ? (
+          <div className="alert alert-warning text-sm">
+            Switch to {sourceMeta.label} to submit the source bridge transaction.
+          </div>
+        ) : null}
+        {bridgeError ? <div className="alert alert-error text-sm">{bridgeError}</div> : null}
+
+        {hasStartedFlow ? (
+          <div className="card bg-base-100 border border-base-300 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">Bridge Progress</div>
+              <StatusBadge status={processSucceeded ? "success" : processInFlight ? "pending" : commitStepStatus} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+              <div className="border border-base-300 rounded p-3 bg-base-200/40 space-y-1">
+                <div className="flex items-center gap-2">
+                  <StepDot status={sourceStepStatus} />
+                  <div className="font-semibold">Source tx submitted</div>
+                </div>
+                <div className="text-base-content/60">User signs once on {sourceMeta.shortLabel}</div>
+              </div>
+              <div className="border border-base-300 rounded p-3 bg-base-200/40 space-y-1">
+                <div className="flex items-center gap-2">
+                  <StepDot status={verifyStepStatus} />
+                  <div className="font-semibold">Relayer verify</div>
+                </div>
+                <div className="text-base-content/60">Mock DVN validation on {destinationMeta.shortLabel}</div>
+              </div>
+              <div className="border border-base-300 rounded p-3 bg-base-200/40 space-y-1">
+                <div className="flex items-center gap-2">
+                  <StepDot status={commitStepStatus} />
+                  <div className="font-semibold">Relayer execute</div>
+                </div>
+                <div className="text-base-content/60">Commit + execute delivery on destination</div>
+              </div>
+            </div>
+            {processSucceeded ? (
+              <div className="flex justify-end">
+                <button className="btn btn-sm btn-outline" onClick={resetBridgeFlow}>
+                  Start another bridge transfer
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {pendingMessage ? (
+          <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
+            <div className="font-medium">Phase 2: Destination processing ({destinationMeta.shortLabel})</div>
+            {processInFlight ? (
+              <div className="alert alert-info text-sm">
+                <LoadingText>Relayer is processing the destination message in the background...</LoadingText>
+              </div>
+            ) : (
+              <>
+                {!isDestinationChain ? (
+                  <div className="alert alert-warning text-sm">
+                    Relayer failed or is unavailable. Switch to {destinationMeta.label} to run manual fallback processing.
+                  </div>
+                ) : null}
+                <button
+                  className="btn btn-secondary"
+                  onClick={onProcess}
+                  disabled={processReceive.isPending}
+                >
+                  {isDestinationChain ? `Manual process on ${destinationMeta.shortLabel}` : `Switch to ${destinationMeta.label}`}
+                </button>
+              </>
+            )}
+            {userFacingProcessError ? (
+              <div className="alert alert-error text-sm whitespace-pre-wrap break-all">{userFacingProcessError}</div>
+            ) : null}
+            {processTimeline.commitExecuteHash ? (
+              <>
+                <div className="text-sm">
+                  {processCompleted
+                    ? `Complete - tokens should be received on ${destinationMeta.shortLabel}.`
+                    : `Processing on ${destinationMeta.shortLabel}...`}
+                </div>
+              </>
+            ) : null}
+            {processLog ? (
+              <div className="bg-base-200 border border-base-300 rounded p-2 max-w-full overflow-x-auto">
+                <div className="text-xs font-semibold mb-1">Decoded process payload</div>
+                <pre className="text-xs whitespace-pre-wrap break-all">{processLog}</pre>
+              </div>
+            ) : null}
+            {processSucceeded ? (
+              <div className="flex flex-wrap gap-3 text-sm">
+                {processTimeline.verifyHash ? (
+                  <a className="link inline-flex items-center gap-1" href={verifyLink} target="_blank" rel="noreferrer">
+                    {destinationMeta.explorerName} Verify <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                  </a>
+                ) : null}
+                {processTimeline.commitExecuteHash ? (
+                  <a className="link inline-flex items-center gap-1" href={commitLink} target="_blank" rel="noreferrer">
+                    {destinationMeta.explorerName} Commit/Execute <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-medium">Advanced: Nonce Gap Recovery</div>
+            <button className="btn btn-ghost btn-xs" onClick={() => setShowRecoveryPanel(v => !v)}>
+              {showRecoveryPanel ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showRecoveryPanel ? (
+            <>
+              <p className="text-xs text-base-content/70">
+                If you see &quot;Nonce X is ahead of sequence&quot; errors, process pending messages in order.
+              </p>
+              <button className="btn btn-warning btn-sm" onClick={onCheckPending} disabled={pendingMessages.isLoading}>
+                {pendingMessages.isLoading ? <LoadingText>Checking...</LoadingText> : "Check Pending Messages"}
+              </button>
+
+              {showCatchUp && pendingInfo ? (
+                <div className="bg-base-200 border border-base-300 rounded p-3 space-y-2">
+                  <div className="text-sm">
+                    <span className="font-medium">Status:</span> Next expected nonce: {pendingInfo.nextNonce.toString()}, Latest sent:{" "}
+                    {pendingInfo.latestOutboundNonce.toString()}
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-medium">Pending messages:</span> {pendingInfo.pendingCount} total, {pendingInfo.pendingMessages.length} found on-chain
+                  </div>
+
+                  {pendingInfo.pendingMessages.length > 0 ? (
+                    <>
+                      <div className="max-h-32 overflow-y-auto text-xs space-y-1">
+                        {pendingInfo.pendingMessages.slice(0, 10).map((msg) => (
+                          <div key={msg.nonce.toString()} className="flex justify-between">
+                            <span>Nonce {msg.nonce.toString()}</span>
+                            <span>{msg.amountLD} ETH → {msg.recipient.slice(0, 8)}...</span>
+                          </div>
+                        ))}
+                        {pendingInfo.pendingMessages.length > 10 ? (
+                          <div className="text-base-content/50">...and {pendingInfo.pendingMessages.length - 10} more</div>
+                        ) : null}
+                      </div>
+
+                      <button className="btn btn-primary btn-sm w-full" onClick={onCatchUp} disabled={catchUpStatus.isProcessing || !isDestinationChain}>
+                        {!isDestinationChain
+                          ? `Switch to ${destinationMeta.shortLabel} First`
+                          : catchUpStatus.isProcessing
+                            ? (
+                                <LoadingText>
+                                  Processing nonce {catchUpStatus.currentNonce?.toString()} ({catchUpStatus.processedCount}/{catchUpStatus.totalCount})
+                                </LoadingText>
+                              )
+                            : `Process All ${pendingInfo.pendingMessages.length} Messages`}
+                      </button>
+
+                      {catchUpStatus.processedCount > 0 && !catchUpStatus.isProcessing ? (
+                        <div className="alert alert-success text-xs">Successfully processed {catchUpStatus.processedCount} messages!</div>
+                      ) : null}
+
+                      {catchUpStatus.errors.length > 0 ? (
+                        <div className="alert alert-error text-xs whitespace-pre-wrap">{catchUpStatus.errors.join("\n")}</div>
+                      ) : null}
+                    </>
+                  ) : pendingInfo.pendingCount > 0 ? (
+                    <div className="alert alert-warning text-xs">
+                      {pendingInfo.pendingCount} messages are pending but couldn&apos;t find them in recent blocks. They may be too old. Try the Simple
+                      Workers page with manual nonce entry.
+                    </div>
+                  ) : (
+                    <div className="alert alert-success text-xs">All messages have been processed. No pending nonces.</div>
+                  )}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+
+        {(submittedTxHash || processTimeline.verifyHash || processTimeline.commitExecuteHash || processTimeline.composeHash) ? (
+          <div className="card bg-base-100 border border-base-300 p-3 space-y-2">
+            <div className="font-medium">Transaction timeline</div>
+            {processSucceeded ? (
+              <div className="alert alert-success text-sm">
+                Bridge complete. Tokens should now be available on the destination chain.
+              </div>
+            ) : null}
+            <div className="text-xs space-y-1">
+              {submittedTxHash ? (
+                <p>
+                  Source send ({sourceMeta.explorerName}):{" "}
+                  <a className="link font-mono break-all" href={sourceTxLink} target="_blank" rel="noreferrer">
+                    {submittedTxHash}
+                  </a>
+                </p>
+              ) : null}
+              {lzLink ? (
+                <p>
+                  LayerZero Scan:{" "}
+                  <a className="link font-mono break-all" href={lzLink} target="_blank" rel="noreferrer">
+                    {lzLink}
+                  </a>
+                </p>
+              ) : null}
+              {processTimeline.verifyHash ? (
+                <p>
+                  DVN verify ({destinationMeta.explorerName}):{" "}
+                  <a className="link font-mono break-all" href={verifyLink} target="_blank" rel="noreferrer">
+                    {processTimeline.verifyHash}
+                  </a>
+                </p>
+              ) : null}
+              {processTimeline.commitExecuteHash ? (
+                <p>
+                  Commit + execute ({destinationMeta.explorerName}):{" "}
+                  <a className="link font-mono break-all" href={commitLink} target="_blank" rel="noreferrer">
+                    {processTimeline.commitExecuteHash}
+                  </a>
+                </p>
+              ) : null}
+              {processTimeline.composeHash ? (
+                <p>
+                  Compose:{" "}
+                  <a className="link font-mono break-all" href={composeLink} target="_blank" rel="noreferrer">
+                    {processTimeline.composeHash}
+                  </a>
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

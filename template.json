@@ -1,0 +1,25 @@
+{
+  "name": "template-hedera-lz-app",
+  "description": "LayerZero on Hedera vault and ETF auto-invest template",
+  "version": "0.1.0",
+  "create-scaffold-hbar": {
+    "capabilities": {
+      "frontend": ["nextjs-app"],
+      "solidityFramework": ["hardhat"],
+      "packageManager": ["none"]
+    },
+    "defaults": {
+      "frontend": "nextjs-app",
+      "solidityFramework": "hardhat",
+      "packageManager": "none"
+    },
+    "outro": {
+      "installCommand": "pnpm install",
+      "steps": [
+        "+Template setup note",
+        "Use this template with pnpm at the project root.",
+        "Use SETUP_INSTRUCTIONS.md for deploy/wire/send steps and RUNBOOK.md for frontend runtime and ops checks."
+      ]
+    }
+  }
+}

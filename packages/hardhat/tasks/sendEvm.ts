@@ -1,0 +1,356 @@
+import path from 'path'
+
+import { BigNumber, Contract, ContractTransaction, constants } from 'ethers'
+import { parseUnits } from 'ethers/lib/utils'
+import { HardhatRuntimeEnvironment } from 'hardhat/types'
+
+import { OmniPointHardhat, createGetHreByEid } from '@layerzerolabs/devtools-evm-hardhat'
+import { createLogger, promptToContinue } from '@layerzerolabs/io-devtools'
+import { ChainType, endpointIdToChainType, endpointIdToNetwork } from '@layerzerolabs/lz-definitions'
+import { Options, addressToBytes32 } from '@layerzerolabs/lz-v2-utilities'
+
+import { SendResult } from './types'
+import { DebugLogger, KnownErrors, MSG_TYPE, getLayerZeroScanLink, isEmptyOptionsEvm } from './utils'
+
+const logger = createLogger()
+
+/**
+ * Get OApp contract address by EID from LayerZero config
+ */
+async function getOAppAddressByEid(
+    eid: number,
+    oappConfig: string,
+    hre: HardhatRuntimeEnvironment,
+    overrideAddress?: string
+): Promise<string> {
+    if (overrideAddress) {
+        return overrideAddress
+    }
+
+    const layerZeroConfig = (await import(path.resolve('./', oappConfig))).default
+    const { contracts } = typeof layerZeroConfig === 'function' ? await layerZeroConfig() : layerZeroConfig
+    const wrapper = contracts.find((c: { contract: OmniPointHardhat }) => c.contract.eid === eid)
+    if (!wrapper) throw new Error(`No config for EID ${eid}`)
+
+    return wrapper.contract.contractName
+        ? (await hre.deployments.get(wrapper.contract.contractName)).address
+        : wrapper.contract.address || ''
+}
+
+export interface EvmArgs {
+    srcEid: number
+    dstEid: number
+    amount: string
+    to: string
+    oappConfig: string
+    minAmount?: string
+    extraLzReceiveOptions?: string[]
+    extraLzComposeOptions?: string[]
+    extraNativeDropOptions?: string[]
+    composeMsg?: string
+    oftAddress?: string
+}
+
+export async function sendEvm(
+    {
+        srcEid,
+        dstEid,
+        amount,
+        to,
+        oappConfig,
+        minAmount,
+        extraLzReceiveOptions,
+        extraLzComposeOptions,
+        extraNativeDropOptions,
+        composeMsg,
+        oftAddress,
+    }: EvmArgs,
+    hre: HardhatRuntimeEnvironment
+): Promise<SendResult> {
+    if (endpointIdToChainType(srcEid) !== ChainType.EVM) {
+        throw new Error(`non-EVM srcEid (${srcEid}) not supported here`)
+    }
+
+    const getHreByEid = createGetHreByEid(hre)
+    let srcEidHre: HardhatRuntimeEnvironment
+    try {
+        srcEidHre = await getHreByEid(srcEid)
+    } catch (error) {
+        DebugLogger.printErrorAndFixSuggestion(
+            KnownErrors.ERROR_GETTING_HRE,
+            `For network: ${endpointIdToNetwork(srcEid)}, OFT: ${oftAddress}`
+        )
+        throw error
+    }
+    const signer = (await srcEidHre.ethers.getSigners())[0]
+
+    // 1️⃣ resolve the OFT wrapper address
+    const wrapperAddress = await getOAppAddressByEid(srcEid, oappConfig, srcEidHre, oftAddress)
+
+    // 2️⃣ load IOFT ABI, extend it with token()
+    const oftArtifact = await srcEidHre.artifacts.readArtifact('OFT')
+
+    // now attach
+    const oft = await srcEidHre.ethers.getContractAt(oftArtifact.abi, wrapperAddress, signer)
+
+    // 🔗 Get LayerZero endpoint contract
+    const endpointDep = await srcEidHre.deployments.get('EndpointV2')
+    const _endpointContract = new Contract(endpointDep.address, endpointDep.abi, signer)
+
+    // Get destination OApp address for outboundNonce call
+    const dstEidHre = await getHreByEid(dstEid)
+    const dstWrapperAddress = await getOAppAddressByEid(dstEid, oappConfig, dstEidHre, oftAddress)
+
+    // We'll get the actual outbound nonce after the transaction is sent
+    const dstWrapperBytes32 = addressToBytes32(dstWrapperAddress)
+
+    // 3️⃣ fetch the underlying token (address(0) for native)
+    const underlying = await oft.token()
+    const isNative = underlying.toLowerCase() === constants.AddressZero.toLowerCase()
+
+    // 4️⃣ fetch decimals from the underlying token
+    let erc20: Contract | null = null
+    let decimals: number
+    if (isNative) {
+        decimals = 18
+    } else {
+        erc20 = await srcEidHre.ethers.getContractAt('ERC20', underlying, signer)
+        decimals = await erc20.decimals()
+    }
+
+    // 5️⃣ normalize the user-supplied amount
+    let amountUnits: BigNumber = parseUnits(amount, decimals)
+    let minAmountUnits: BigNumber | null = minAmount ? parseUnits(minAmount, decimals) : null
+
+    if (isNative) {
+        const sharedDecimals = await oft.sharedDecimals()
+        const conversionRate = BigNumber.from(10).pow(decimals - sharedDecimals)
+        const dust = amountUnits.mod(conversionRate)
+        if (!dust.isZero()) {
+            const dustFree = amountUnits.sub(dust)
+            logger.warn(
+                `Native OFT amount has dust; truncating from ${amountUnits.toString()} to ${dustFree.toString()}`
+            )
+            amountUnits = dustFree
+            if (minAmountUnits && minAmountUnits.gt(amountUnits)) {
+                minAmountUnits = amountUnits
+            }
+        }
+    }
+
+    // 6️⃣ Check if approval is required (for OFT Adapters) and handle approval
+    try {
+        const approvalRequired = await oft.approvalRequired()
+        if (approvalRequired) {
+            if (!erc20) {
+                throw new Error('Approval required but underlying token is native')
+            }
+            logger.info('OFT Adapter detected - checking allowance...')
+
+            // Check current allowance
+            const currentAllowance = await erc20.allowance(signer.address, wrapperAddress)
+            logger.info(`Current allowance: ${currentAllowance.toString()}`)
+            logger.info(`Required amount: ${amountUnits.toString()}`)
+
+            if (currentAllowance.lt(amountUnits)) {
+                // Check if this is Hedera (uses HTS precompile for approvals)
+                const isHedera = srcEid === 40285 // HEDERA_V2_TESTNET
+                
+                if (isHedera) {
+                    logger.info('Hedera detected - using HTS precompile for approval...')
+                    const HTS_PRECOMPILE = '0x0000000000000000000000000000000000000167'
+                    const htsApproveAbi = [
+                        'function approve(address token, address spender, uint256 amount) external returns (int64)'
+                    ]
+                    const htsPrecompile = new Contract(HTS_PRECOMPILE, htsApproveAbi, signer)
+                    
+                    // HTS max allowance is int64 max (2^63 - 1)
+                    const htsMaxAllowance = BigNumber.from(2).pow(63).sub(1)
+                    const approveAmount = amountUnits.gt(htsMaxAllowance) ? htsMaxAllowance : amountUnits
+                    
+                    const approveTx = await htsPrecompile.approve(underlying, wrapperAddress, approveAmount, {
+                        gasLimit: 1_500_000,
+                    })
+                    logger.info(`HTS Approval transaction hash: ${approveTx.hash}`)
+                    await approveTx.wait()
+                    logger.info('HTS approval confirmed')
+                } else {
+                    logger.info('Insufficient allowance - approving ERC20 tokens...')
+                    const approveTx = await erc20.approve(wrapperAddress, amountUnits)
+                    logger.info(`Approval transaction hash: ${approveTx.hash}`)
+                    await approveTx.wait()
+                    logger.info('ERC20 approval confirmed')
+                }
+            } else {
+                logger.info('Sufficient allowance already exists')
+            }
+        }
+    } catch (error) {
+        // If approvalRequired() doesn't exist or fails, assume it's a regular OFT (not an adapter)
+        logger.info('No approval required (regular OFT detected)')
+    }
+
+    // 7️⃣ hex string → Uint8Array → zero-pad to 32 bytes
+    const toBytes = addressToBytes32(to)
+
+    // 8️⃣ Build options dynamically using Options.newOptions()
+    let options = Options.newOptions()
+
+    // Add lzReceive options
+    if (extraLzReceiveOptions && extraLzReceiveOptions.length > 0) {
+        // Handle case where Hardhat's CSV parsing splits "gas,value" into separate elements
+        if (extraLzReceiveOptions.length % 2 !== 0) {
+            throw new Error(
+                `Invalid lzReceive options: received ${extraLzReceiveOptions.length} values, but expected pairs of gas,value`
+            )
+        }
+
+        for (let i = 0; i < extraLzReceiveOptions.length; i += 2) {
+            const gas = extraLzReceiveOptions[i]
+            const value = extraLzReceiveOptions[i + 1] ?? 0
+            options = options.addExecutorLzReceiveOption(gas, value)
+            logger.info(`Added lzReceive option: ${gas} gas, ${value} value`)
+        }
+    }
+
+    // Add lzCompose options
+    if (extraLzComposeOptions && extraLzComposeOptions.length > 0) {
+        // Handle case where Hardhat's CSV parsing splits "index,gas,value" into separate elements
+        if (extraLzComposeOptions.length % 3 !== 0) {
+            throw new Error(
+                `Invalid lzCompose options: received ${extraLzComposeOptions.length} values, but expected triplets of index,gas,value`
+            )
+        }
+
+        for (let i = 0; i < extraLzComposeOptions.length; i += 3) {
+            const index = Number(extraLzComposeOptions[i])
+            const gas = extraLzComposeOptions[i + 1]
+            const value = extraLzComposeOptions[i + 2] ?? 0
+            options = options.addExecutorComposeOption(index, gas, value)
+            logger.info(`Added lzCompose option: index ${index}, ${gas} gas, ${value} value`)
+        }
+    }
+
+    // Add native drop options
+    if (extraNativeDropOptions && extraNativeDropOptions.length > 0) {
+        // Handle case where Hardhat's CSV parsing splits "amount,recipient" into separate elements
+        if (extraNativeDropOptions.length % 2 !== 0) {
+            throw new Error(
+                `Invalid native drop options: received ${extraNativeDropOptions.length} values, but expected pairs of amount,recipient`
+            )
+        }
+
+        for (let i = 0; i < extraNativeDropOptions.length; i += 2) {
+            const amountStr = extraNativeDropOptions[i]
+            const recipient = extraNativeDropOptions[i + 1]
+
+            if (!amountStr || !recipient) {
+                throw new Error(
+                    `Invalid native drop option: Both amount and recipient must be provided. Got amount="${amountStr}", recipient="${recipient}"`
+                )
+            }
+
+            try {
+                options = options.addExecutorNativeDropOption(amountStr.trim(), recipient.trim())
+                logger.info(`Added native drop option: ${amountStr.trim()} wei to ${recipient.trim()}`)
+            } catch (error) {
+                // Provide helpful context if the amount exceeds protocol limits
+                const maxUint128 = BigInt('340282366920938463463374607431768211455') // 2^128 - 1
+                const maxUint128Ether = Number(maxUint128) / 1e18 // Convert to ETH for readability
+
+                throw new Error(
+                    `Failed to add native drop option with amount ${amountStr.trim()} wei. ` +
+                        `LayerZero protocol constrains native drop amounts to uint128 maximum ` +
+                        `(${maxUint128.toString()} wei ≈ ${maxUint128Ether.toFixed(2)} ETH). ` +
+                        `Original error: ${error instanceof Error ? error.message : String(error)}`
+                )
+            }
+        }
+    }
+    const extraOptions = options.toHex()
+
+    // Check whether there are extra options or enforced options. If not, warn the user.
+    // Read on Message Options: https://docs.layerzero.network/v2/concepts/message-options
+    if (isEmptyOptionsEvm(extraOptions)) {
+        try {
+            const enforcedOptions = composeMsg
+                ? await oft.enforcedOptions(dstEid, MSG_TYPE.SEND_AND_CALL)
+                : await oft.enforcedOptions(dstEid, MSG_TYPE.SEND)
+
+            if (isEmptyOptionsEvm(enforcedOptions)) {
+                const proceed = await promptToContinue(
+                    'No extra options were included and OFT has no set enforced options. Your quote / send will most likely fail. Continue?'
+                )
+                if (!proceed) {
+                    throw new Error('Aborted due to missing options')
+                }
+            }
+        } catch (error) {
+            logger.debug(`Failed to check enforced options: ${error}`)
+        }
+    }
+
+    // 9️⃣ build sendParam and dispatch
+    const sendParam = {
+        dstEid,
+        to: toBytes,
+        amountLD: amountUnits.toString(),
+        minAmountLD: (minAmountUnits ?? amountUnits).toString(),
+        extraOptions: extraOptions,
+        composeMsg: composeMsg ? composeMsg.toString() : '0x',
+        oftCmd: '0x',
+    }
+
+    // 10️⃣ Quote (MessagingFee = { nativeFee, lzTokenFee })
+    logger.info('Quoting the native gas cost for the send transaction...')
+    let msgFee: { nativeFee: BigNumber; lzTokenFee: BigNumber }
+    try {
+        msgFee = await oft.quoteSend(sendParam, false)
+    } catch (error) {
+        DebugLogger.printErrorAndFixSuggestion(
+            KnownErrors.ERROR_QUOTING_NATIVE_GAS_COST,
+            `For network: ${endpointIdToNetwork(srcEid)}, OFT: ${oftAddress}`
+        )
+        throw error
+    }
+    // Get the outbound nonce that will be used for this transaction (before sending)
+    const outboundNonce = (await _endpointContract.outboundNonce(wrapperAddress, dstEid, dstWrapperBytes32)).add(1)
+
+    logger.info('Sending the transaction...')
+    let tx: ContractTransaction
+    
+    // Hedera JSON-RPC transaction value is wei-like, while contracts see msg.value in tinybars.
+    // Keep the LayerZero fee struct in contract units and scale only the transaction value.
+    const isHedera = srcEid === 40285 // HEDERA_V2_TESTNET
+    const HEDERA_TINYBAR_TO_WEIBAR = BigNumber.from('10000000000')
+
+    // Calculate msg.value
+    let msgValue = isNative ? msgFee.nativeFee.add(amountUnits) : msgFee.nativeFee
+    if (isHedera) {
+        msgValue = msgValue.mul(HEDERA_TINYBAR_TO_WEIBAR)
+        logger.info(`Hedera detected - scaled tx value to ${msgValue.toString()} wei`)
+    }
+    
+    // Transaction options - add explicit gasLimit for Hedera to bypass estimation issues
+    const txOptions: { value: BigNumber; gasLimit?: number } = { value: msgValue }
+    if (isHedera) {
+        txOptions.gasLimit = 3_000_000 // Explicit gas limit for Hedera
+        logger.info('Using explicit gasLimit: 3000000 for Hedera')
+    }
+    
+    try {
+        tx = await oft.send(sendParam, msgFee, signer.address, txOptions)
+    } catch (error) {
+        DebugLogger.printErrorAndFixSuggestion(
+            KnownErrors.ERROR_SENDING_TRANSACTION,
+            `For network: ${endpointIdToNetwork(srcEid)}, OFT: ${oftAddress}`
+        )
+        throw error
+    }
+    const receipt = await tx.wait()
+
+    const txHash = receipt.transactionHash
+    const scanLink = getLayerZeroScanLink(txHash, srcEid >= 40_000 && srcEid < 50_000)
+
+    return { txHash, scanLink, outboundNonce: outboundNonce.toString(), extraOptions }
+}
