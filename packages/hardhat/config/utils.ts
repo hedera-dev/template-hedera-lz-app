@@ -42,6 +42,20 @@ export const loadDeploymentAddress = (eid: number, contractName: string): string
     return deployment.address
 }
 
+/**
+ * Like loadDeploymentAddress, but returns undefined instead of throwing when the
+ * deployment artifact does not exist yet. Useful for config defaults that should
+ * resolve to the latest deploy when present, and fall back to a fresh deploy
+ * otherwise.
+ */
+export const loadDeploymentAddressOrUndefined = (eid: number, contractName: string): string | undefined => {
+    try {
+        return loadDeploymentAddress(eid, contractName)
+    } catch {
+        return undefined
+    }
+}
+
 const ADDRESSES_CONFIG_PATH = path.resolve(process.cwd(), 'env/addresses.testnet.json')
 const ADDRESSES_NETWORK_KEY = 'hedera-testnet'
 
