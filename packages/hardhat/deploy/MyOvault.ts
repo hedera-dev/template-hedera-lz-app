@@ -2,6 +2,7 @@ import assert from 'assert'
 
 import { type DeployFunction } from 'hardhat-deploy/types'
 
+import { syncWethTokenAddress } from '../config/utils'
 import { DEPLOYMENT_CONFIG, isVaultChain, shouldDeployAsset, shouldDeployShare } from '../devtools'
 
 const deploy: DeployFunction = async (hre) => {
@@ -90,11 +91,10 @@ const deploy: DeployFunction = async (hre) => {
             console.log(`Using deployed asset address: ${assetOFTAddress}`)
         }
 
-        // Fetch underlying token address from the OFT using the IOFT artifact.
-        // For HTSConnector, this is the HTS token address used as the vault asset.
-        const IOFTArtifact = await hre.artifacts.readArtifact('IOFT')
-        const oftContract = await hre.ethers.getContractAt(IOFTArtifact.abi, assetOFTAddress)
-        assetTokenAddress = await oftContract.token()
+        // Fetch underlying token address from the OFT (HTSConnector exposes the HTS
+        // token used as the vault asset) and sync it into env/addresses.testnet.json
+        // so downstream consumers never read a stale WETH address.
+        assetTokenAddress = await syncWethTokenAddress(hre, assetOFTAddress)
         console.log(`Underlying asset token address found from OFT deployment: ${assetTokenAddress}`)
 
         // Get vault address (existing or deploy new)

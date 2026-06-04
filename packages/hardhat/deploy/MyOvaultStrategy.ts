@@ -2,6 +2,7 @@ import assert from 'assert'
 
 import { type DeployFunction } from 'hardhat-deploy/types'
 
+import { syncWethTokenAddress } from '../config/utils'
 import {
     DEPLOYMENT_CONFIG_STRATEGY,
     isVaultChainStrategy,
@@ -82,9 +83,9 @@ const deploy: DeployFunction = async (hre) => {
             console.log(`Using deployed asset address: ${assetOFTAddress}`)
         }
 
-        const IOFTArtifact = await hre.artifacts.readArtifact('IOFT')
-        const oftContract = await hre.ethers.getContractAt(IOFTArtifact.abi, assetOFTAddress)
-        assetTokenAddress = await oftContract.token()
+        // Resolve the underlying HTS token from the OFT and sync it into
+        // env/addresses.testnet.json to keep the WETH address fresh everywhere.
+        assetTokenAddress = await syncWethTokenAddress(hre, assetOFTAddress)
         console.log(`Underlying asset token address found from OFT deployment: ${assetTokenAddress}`)
 
         let vaultAddress: string

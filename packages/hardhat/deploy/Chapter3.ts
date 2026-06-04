@@ -5,7 +5,7 @@ import path from 'path'
 import { type DeployFunction } from 'hardhat-deploy/types'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
-import { loadDeploymentAddress } from '../config/utils'
+import { loadDeploymentAddress, syncWethTokenAddress } from '../config/utils'
 import { DEPLOYMENT_CONFIG_STRATEGY } from '../devtools'
 
 const ADDRESSES_PATH = path.resolve(process.cwd(), 'env/addresses.testnet.json')
@@ -46,9 +46,9 @@ const deploy: DeployFunction = async (hre) => {
     const assetOFTAddress = loadDeploymentAddress(EndpointId.HEDERA_V2_TESTNET, 'MyHTSConnector')
     console.log(`Using existing MyHTSConnector: ${assetOFTAddress}`)
 
-    const ioftArtifact = await hre.artifacts.readArtifact('IOFT')
-    const oft = await hre.ethers.getContractAt(ioftArtifact.abi, assetOFTAddress)
-    const assetTokenAddress = await oft.token()
+    // Resolve the underlying HTS token from the connector and keep
+    // env/addresses.testnet.json in sync so the WETH address never goes stale.
+    const assetTokenAddress = await syncWethTokenAddress(hre, assetOFTAddress)
     console.log(`Underlying asset token address found from OFT deployment: ${assetTokenAddress}`)
 
     const config = JSON.parse(fs.readFileSync(ADDRESSES_PATH, 'utf8'))

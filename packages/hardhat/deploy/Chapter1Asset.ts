@@ -4,6 +4,8 @@ import { type DeployFunction } from 'hardhat-deploy/types'
 
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
+import { syncWethTokenAddress } from '../config/utils'
+
 // Fetch Hedera USD/HBAR rate (mirrornode). Fallback to env override or a static default.
 async function getHtsCreateFeeWei(): Promise<string> {
     const WEI_PER_HBAR = 1_000_000_000_000_000_000n
@@ -73,6 +75,11 @@ const deploy: DeployFunction = async (hre) => {
             gasLimit: 3_500_000, // increase gas limit
         })
         console.log(`Deployed contract: MyHTSConnector, network: ${hre.network.name}, address: ${address}`)
+
+        // The HTS token is created by the connector at deploy time, so its address
+        // changes on every fresh deploy. Sync it into env/addresses.testnet.json
+        // immediately to avoid stale WETH addresses in downstream consumers.
+        await syncWethTokenAddress(hre, address)
     }
 }
 
