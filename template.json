@@ -18,7 +18,7 @@
       "steps": [
         "+Template setup note",
         "Use this template with pnpm at the project root.",
-        "Use SETUP_INSTRUCTIONS.md for deploy/wire/send steps and RUNBOOK.md for frontend runtime and ops checks."
+        "Use README.md for deploy/wire/send steps and RUNBOOK.md for frontend runtime and ops checks."
       ]
     }
   }

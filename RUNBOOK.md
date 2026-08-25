@@ -1,10 +1,10 @@
 # Frontend and Ops Runbook
 
-This runbook covers frontend runtime setup and operational checks that complement the canonical deployment flow in `README_v3.md`.
+This runbook covers frontend runtime setup and operational checks that complement the canonical deployment flow in `README.md`.
 
 ## Scope
 
-- Use `README_v3.md` for contract deployment, wiring, and chapter ordering.
+- Use `README.md` for contract deployment, wiring, and chapter ordering.
 - Use this file for frontend env setup, relayer setup, and runtime verification after deploys.
 
 ## Environment Setup
@@ -46,7 +46,7 @@ NEXT_PUBLIC_ENABLE_BURNER=false
 
 ## Frontend Runtime Flow
 
-After contract deploy/wire steps from `README_v3.md`:
+After contract deploy/wire steps from `README.md`:
 
 ```bash
 pnpm next:gen-contracts
@@ -61,5 +61,5 @@ After redeploys, verify `packages/nextjs/contracts/deployedContracts.ts` include
 
 ## Operational Notes
 
-- If messages are pending, use the Simple Worker process/commit/execute tasks described in `README_v3.md`.
+- If messages are pending, use the Simple Worker process/commit/execute tasks in [`docs/simple-workers/SIMPLE_WORKERS_GUIDE.md`](docs/simple-workers/SIMPLE_WORKERS_GUIDE.md).
 - If strategy compose approval issues appear, use `lz:fix:composer-approval` from hardhat tasks and re-test the affected flow.
