@@ -44,9 +44,9 @@ export const loadDeploymentAddress = (eid: number, contractName: string): string
 
 /**
  * Like loadDeploymentAddress, but returns undefined instead of throwing when the
- * deployment artifact does not exist yet. Useful for config defaults that should
- * resolve to the latest deploy when present, and fall back to a fresh deploy
- * otherwise.
+ * deployment artifact does not exist yet. Callers should supply their own
+ * fallback (for example a published testnet pin) rather than treating undefined
+ * as "deploy a new contract".
  */
 export const loadDeploymentAddressOrUndefined = (eid: number, contractName: string): string | undefined => {
     try {

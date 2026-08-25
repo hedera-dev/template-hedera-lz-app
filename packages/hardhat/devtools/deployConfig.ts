@@ -20,12 +20,17 @@ import { DeploymentConfig } from './types'
 const HUB_EID = EndpointId.HEDERA_V2_TESTNET
 const SPOKE_EIDS = [EndpointId.BASESEP_V2_TESTNET]
 
-// Resolve the asset OFT (MyHTSConnector) address from the latest deployment
-// artifact instead of hardcoding it. This keeps the config fresh after every
-// `chapter1-asset` redeploy and avoids stale pins. Falls back to undefined when
-// no connector has been deployed yet, in which case the deploy scripts will
-// deploy a fresh one.
-const LATEST_ASSET_OFT_ADDRESS = loadDeploymentAddressOrUndefined(HUB_EID, 'MyHTSConnector')
+// Last known-good Hedera testnet MyHTSConnector. Used only when this checkout
+// has no local chapter1-asset artifact yet. Never leave assetOFTAddress
+// undefined: the ovault / ovault-strategy scripts would deploy a second,
+// unwired connector.
+const PUBLISHED_ASSET_OFT_ADDRESS = '0x2Df2cD4AC708488caacdDC0118F0995e55C74f98'
+
+// Prefer the local Chapter 1 artifact so a fresh connector redeploy is picked
+// up automatically. Fall back to the published pin so a clone without
+// deployments still attaches to a working testnet OFT.
+const ASSET_OFT_ADDRESS =
+    loadDeploymentAddressOrUndefined(HUB_EID, 'MyHTSConnector') ?? PUBLISHED_ASSET_OFT_ADDRESS
 
 // ============================================
 // Chapter 2: Basic OVault Configuration
@@ -39,9 +44,9 @@ export const DEPLOYMENT_CONFIG: DeploymentConfig = {
             composer: 'MyOVaultComposer',
         },
         // Set these to use existing contracts instead of deploying new ones.
-        // assetOFTAddress auto-resolves to the latest deployed MyHTSConnector.
+        // assetOFTAddress: local MyHTSConnector artifact, else published pin.
         vaultAddress: undefined,
-        assetOFTAddress: LATEST_ASSET_OFT_ADDRESS,
+        assetOFTAddress: ASSET_OFT_ADDRESS,
         shareOFTAdapterAddress: undefined,
     },
     shareOFT: {
@@ -68,9 +73,8 @@ export const DEPLOYMENT_CONFIG_STRATEGY: DeploymentConfig = {
             composer: 'MyOVaultComposerStrategy',
         },
         vaultAddress: undefined,
-        // Auto-resolves to the latest deployed MyHTSConnector artifact so it never
-        // goes stale; no manual update needed after a chapter1-asset redeploy.
-        assetOFTAddress: LATEST_ASSET_OFT_ADDRESS,
+        // Local MyHTSConnector artifact, else published pin. Never undefined.
+        assetOFTAddress: ASSET_OFT_ADDRESS,
         shareOFTAdapterAddress: undefined,
     },
     shareOFT: {
