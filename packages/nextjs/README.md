@@ -21,7 +21,7 @@ Main goals:
 The app provides 4 main user/operator surfaces:
 
 - `/bridge` - bridge assets between Base and Hedera (Chapter 1 flow)
-- `/vault` - deposit to Hedera vault from Base, and redeem shares back to Base ETH (Chapter 3 flow)
+- `/vault` - deposit to Hedera vault from Base, and redeem shares back to Base ETH (Chapter 2 flow)
 - `/strategy` - read-only strategy and vault state dashboard
 - `/mock-workers` - advanced/manual worker recovery console (operator-oriented)
 

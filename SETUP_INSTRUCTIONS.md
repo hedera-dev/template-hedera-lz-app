@@ -1,23 +1,6 @@
 # LayerZero on Hedera: A Developer Tutorial
 
-Build cross-chain applications using LayerZero on Hedera. This tutorial takes you from simple token transfers to a fully automated ETF vault that interacts with DeFi protocols.
-
-## What You'll Learn
-
-
-| Chapter | Topic             | What You'll Build                                                   |
-| ------- | ----------------- | ------------------------------------------------------------------- |
-| 1       | Cross-Chain OFT   | Send native ETH from Base to Hedera as an HTS token                 |
-| 2       | Cross-Chain Vault | ERC4626 vault with omnichain deposits and redemptions               |
-| 3       | ETF Strategy      | Auto-investing vault that swaps into a 50/50 HBAR + HUSTLERS basket |
-
-
-## Prerequisites
-
-- Node.js 18+
-- pnpm
-- Private key with testnet funds on both Base Sepolia and Hedera Testnet
-- Basic understanding of Solidity and LayerZero concepts
+Start from [README.md](README.md) for the create command, prerequisites, and install. This file is the chapter-by-chapter deploy, wire, and send walkthrough.
 
 ## Architecture Overview
 
@@ -39,23 +22,6 @@ BASE (Spoke)                           HEDERA (Hub)
 └─────────────────┘                   │ (50/50 HBAR + HUSTLERS) │
                                       └─────────────────────────┘
 ```
-
-## Quick Start
-
-```bash
-# Install dependencies
-pnpm install
-
-# Set up environment
-cp .env.example .env
-cp packages/nextjs/.env.example packages/nextjs/.env.local
-# Edit .env and packages/nextjs/.env.local with required values
-
-# Compile contracts
-pnpm hardhat:compile
-```
-
----
 
 ## Chapter 1: Cross-Chain OFT
 
@@ -106,7 +72,7 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 pnpm hardhat lz:oft:send \
   --src-eid 40245 \
   --dst-eid 40285 \
-  --amount 0.05 \
+  --amount 0.01 \
   --to 0xYOUR_ADDRESS \
   --simple-workers
 ```

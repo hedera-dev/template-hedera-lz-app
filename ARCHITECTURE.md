@@ -1,96 +1,95 @@
-# Hedera ETF Strategy (MVP)
+# Architecture
 
-This repo now includes a minimal on-chain strategy that swaps a single input asset into a 50/50 basket of HBAR + SAUCE using SaucerSwap V2. It is intentionally lightweight: no oracles, no rebalancing, and no risk controls.
+Hub-and-spoke LayerZero app: **Hedera Testnet** is the hub, **Base Sepolia** is the spoke.
+
+```
+BASE (Spoke)                           HEDERA (Hub)
+┌─────────────────┐                   ┌─────────────────────────┐
+│ MyNativeOFT     │◄──── LayerZero ──►│ MyHTSConnector          │ Ch.1
+│ Adapter         │                   │ (wraps ETH as HTS)      │
+└─────────────────┘                   └─────────────────────────┘
+
+┌─────────────────┐                   ┌─────────────────────────┐
+│ MyShareOFT      │◄──── LayerZero ──►│ MyERC4626 + Adapter     │ Ch.2
+│ (share tokens)  │                   │ + OVaultComposer        │
+└─────────────────┘                   └─────────────────────────┘
+
+┌─────────────────┐                   ┌─────────────────────────┐
+│ MyShareOFT      │◄──── LayerZero ──►│ MyERC4626Strategy       │ Ch.3
+│ (share tokens)  │                   │ + HederaEtfStrategy     │
+└─────────────────┘                   │ (50/50 HBAR + HUSTLERS) │
+                                      └─────────────────────────┘
+```
+
+Walkthrough, deploy tags, and ownership transfer: [SETUP_INSTRUCTIONS.md](SETUP_INSTRUCTIONS.md). Pool/token helpers: [env/README.md](env/README.md).
+
+## Chapter 3 strategy
+
+`HederaEtfStrategy` is a minimal on-chain basket: it splits WETH 50/50 and swaps into **HBAR + HUSTLERS** via **SaucerSwap V1** (not V2, not SAUCE). No oracles, no rebalancing, no risk controls. Swaps use `amountOutMin = 0`.
+
+The vault (`MyERC4626Strategy`) is the intended owner. `invest` / `divest` / rescue are `onlyOwner`, so transfer strategy ownership to the vault before the first Chapter 3 deposit.
 
 **Core idea**
-- Users (or a vault/manager) provide the input asset (e.g., WETH on Hedera).
-- The strategy splits the amount 50/50.
-- Half swaps to SAUCE.
-- Half swaps to WHBAR and unwraps to native HBAR.
 
-The vault logic itself is unchanged. This strategy is a standalone module that can be owned by a vault/manager and invoked when desired.
+- Deposits arrive as the vault asset (HTS-wrapped WETH from Chapter 1).
+- If auto-invest is on, the vault approves the strategy and calls `invest`.
+- Half of `amountIn` swaps to HUSTLERS (`swapExactTokensForTokens`).
+- The other half swaps to native HBAR via WHBAR (`swapExactTokensForETH`).
+- The strategy holds HBAR + HUSTLERS. The vault tracks `investedAssets` (cost basis), not mark-to-market NAV.
 
 **Key contracts**
-- `contracts/HederaEtfStrategy.sol`: executes the 50/50 swap using SaucerSwap V2.
-- `deploy/HederaEtfStrategy.ts`: deploys the strategy with configurable token/router addresses.
-- `tasks/strategyInvest.ts`: helper task to approve + invest.
+
+- `packages/hardhat/contracts/HederaEtfStrategy.sol` — 50/50 swap module.
+- `packages/hardhat/contracts/MyERC4626Strategy.sol` — ERC4626 vault that auto-invests on deposit and divests on withdraw when idle WETH is insufficient.
+- `packages/hardhat/deploy/HederaEtfStrategy.ts` — deploys with `routerV1` / `whbarToken` / `hustlersToken` from `env/addresses.testnet.json`, plus the Chapter 1 connector token as `asset`.
+- `packages/hardhat/tasks/strategyInvest.ts` — standalone `lz:strategy:invest` helper.
 
 **Strategy flow**
-1) `invest(amountIn, minHbarOut, minSauceOut, deadline)` is called by the owner.
-2) The strategy pulls `amountIn` of the asset from the owner.
-3) It swaps half to SAUCE and half to WHBAR (then unwraps to HBAR).
-4) The strategy holds SAUCE + HBAR balances.
+
+1. Owner calls `invest(amountIn, deadline)` (the vault does this inside `_deposit`).
+2. Strategy pulls `amountIn` of the asset from the owner.
+3. It swaps half to HUSTLERS and half to native HBAR.
+4. On vault withdraw, if the vault does not hold enough idle WETH, it calls `divest(assetsToDivest, investedAssets, deadline)` to swap a proportional slice of the basket back to WETH.
 
 **Limitations**
-- No price oracles or NAV; this is purely swap logic.
-- No rebalancing or automated execution.
-- No withdrawal logic for the basket (use `rescueToken`/`rescueHbar` for manual unwinds).
-- Assumes auto-associations are enabled for HTS tokens.
 
----
+- No price oracles or NAV. `totalAssets()` is idle WETH plus `investedAssets` (amount sent in), not the current HBAR + HUSTLERS value.
+- No rebalancing. The 50/50 split is only at invest time.
+- Slippage is unprotected (`amountOutMin = 0`).
+- Constructor associates the strategy with the HTS asset and HUSTLERS tokens. Auto-association is not a substitute for that.
+- Rescue is for stuck balances / manual unwind, not the happy-path redeem. Prefer vault withdraw → `divest` when the vault owns the strategy.
 
-**Configuration (Hedera Testnet)**
-You must provide the asset and Hedera token/router addresses when deploying.
+**Standalone invest (optional)**
 
-Known testnet addresses (0.0.x converted to solidity addresses):
-- SaucerSwap V2 Router (0.0.1414040) -> `0x0000000000000000000000000000000000159398`
-- WHBAR token (0.0.15058) -> `0x0000000000000000000000000000000000003ad2`
-- SAUCE token (0.0.1183558) -> `0x0000000000000000000000000000000000120f46`
+The tutorial path is vault deposit, not this task. Use it only while the EOA still owns the strategy (before ownership transfer):
 
-Asset (WETH) address is not provided here; use your deployed/bridged asset token.
-
-Pool fee defaults:
-- `STRATEGY_HBAR_POOL_FEE=3000`
-- `STRATEGY_SAUCE_POOL_FEE=3000`
-
----
-
-**Deploy**
-```
-STRATEGY_ASSET=<WETH_ADDRESS> \
-STRATEGY_SAUCE=0x0000000000000000000000000000000000120f46 \
-STRATEGY_WHBAR=0x0000000000000000000000000000000000003ad2 \
-STRATEGY_ROUTER=0x0000000000000000000000000000000000159398 \
-STRATEGY_HBAR_POOL_FEE=3000 \
-STRATEGY_SAUCE_POOL_FEE=3000 \
-pnpm hardhat deploy --tags strategy --network hedera-testnet
-```
-
----
-
-**Use (swap into HBAR + SAUCE)**
-The strategy is `onlyOwner`, so the owner must call `invest` after approving the asset.
-
-```
+```bash
 pnpm hardhat lz:strategy:invest \
   --strategy <STRATEGY_ADDRESS> \
   --amount 1 \
   --decimals 18 \
-  --min-hbar-out 0 \
-  --min-sauce-out 0 \
   --network hedera-testnet
 ```
 
-Notes:
-- `amount` is human units; it is converted using `--decimals`.
-- `min-hbar-out` is in tinybar (HBAR’s smallest unit).
-- `min-sauce-out` is in SAUCE’s smallest unit (6 decimals).
+`amount` is human units; the task converts with `--decimals` and sets a 10-minute deadline unless you pass `--deadline`.
 
----
+**Rescue (owner only)**
+
+```solidity
+rescueToken(address token, address to, uint256 amount)
+rescueHbar(address to, uint256 amount)
+```
 
 **Verify balances**
-```
+
+```bash
 pnpm hardhat console --network hedera-testnet
 ```
+
 ```javascript
 const strategy = await ethers.getContractAt("HederaEtfStrategy", "<STRATEGY_ADDRESS>")
-const sauce = await ethers.getContractAt(["function balanceOf(address) view returns (uint256)"], "0x0000000000000000000000000000000000120f46")
-await sauce.balanceOf(strategy.address)
+const hustlers = await strategy.hustlers()
+const token = await ethers.getContractAt(["function balanceOf(address) view returns (uint256)"], hustlers)
+await token.balanceOf(strategy.address)
 await ethers.provider.getBalance(strategy.address) // native HBAR
 ```
-
----
-
-**If you want a vault to manage this strategy**
-- Transfer ownership of the strategy to the vault/composer/manager address.
-- Approve the strategy to spend the vault’s asset token before calling `invest`.

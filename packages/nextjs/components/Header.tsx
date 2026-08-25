@@ -182,7 +182,7 @@ export const Header = () => {
 
                 <section className="rounded-xl border border-base-300 bg-base-100 p-4">
                   <p className="m-0 text-sm text-base-content/80">
-                    Canonical instructions: <code>SETUP_INSTRUCTIONS.md</code> (contracts/deploy/wire) and <code>RUNBOOK.md</code>{" "}
+                    Canonical instructions: <code>README.md</code> (start here), <code>SETUP_INSTRUCTIONS.md</code> (contracts/deploy/wire), and <code>RUNBOOK.md</code>{" "}
                     (frontend + operational checks).
                   </p>
                 </section>

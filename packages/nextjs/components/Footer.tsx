@@ -46,7 +46,7 @@ export const Footer = () => {
 
         <div className="flex flex-wrap items-center gap-3 text-sm text-base-content/60 md:justify-end">
           <a
-            href="https://github.com/buidler-labs/scaffold-hbar"
+            href="https://github.com/hedera-dev/template-hedera-lz-app"
             target="_blank"
             rel="noreferrer"
             className="link hover:text-primary"
