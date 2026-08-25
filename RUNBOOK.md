@@ -1,10 +1,11 @@
 # Frontend and Ops Runbook
 
-This runbook covers frontend runtime setup and operational checks that complement the canonical deployment flow in `README.md`.
+This runbook covers frontend runtime setup and operational checks that complement the chapter walkthrough in `SETUP_INSTRUCTIONS.md`.
 
 ## Scope
 
-- Use `README.md` for contract deployment, wiring, and chapter ordering.
+- Use `README.md` to create the project and install.
+- Use `SETUP_INSTRUCTIONS.md` for contract deployment, wiring, and chapter ordering.
 - Use this file for frontend env setup, relayer setup, and runtime verification after deploys.
 
 ## Environment Setup
@@ -46,7 +47,7 @@ NEXT_PUBLIC_ENABLE_BURNER=false
 
 ## Frontend Runtime Flow
 
-After contract deploy/wire steps from `README.md`:
+After contract deploy/wire steps from `SETUP_INSTRUCTIONS.md`:
 
 ```bash
 pnpm next:gen-contracts

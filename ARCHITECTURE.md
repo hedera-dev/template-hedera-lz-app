@@ -25,4 +25,4 @@ BASE (Spoke)                           HEDERA (Hub)
 
 `HederaEtfStrategy` swaps deposited WETH into a 50/50 **HBAR + HUSTLERS** basket via **SaucerSwap V1** (not V2, not SAUCE). The vault (`MyERC4626Strategy`) must own the strategy before the first Chapter 3 deposit.
 
-Walkthrough, deploy tags, and ownership transfer: see [README.md](README.md) Chapter 3. Pool/token helpers: [env/README.md](env/README.md).
+Walkthrough, deploy tags, and ownership transfer: see [SETUP_INSTRUCTIONS.md](SETUP_INSTRUCTIONS.md) Chapter 3. Pool/token helpers: [env/README.md](env/README.md).
