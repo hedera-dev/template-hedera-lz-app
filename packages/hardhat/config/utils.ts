@@ -42,6 +42,20 @@ export const loadDeploymentAddress = (eid: number, contractName: string): string
     return deployment.address
 }
 
+/**
+ * Like loadDeploymentAddress, but returns undefined instead of throwing when the
+ * deployment artifact does not exist yet. Callers should supply their own
+ * fallback (for example a published testnet pin) rather than treating undefined
+ * as "deploy a new contract".
+ */
+export const loadDeploymentAddressOrUndefined = (eid: number, contractName: string): string | undefined => {
+    try {
+        return loadDeploymentAddress(eid, contractName)
+    } catch {
+        return undefined
+    }
+}
+
 const ADDRESSES_CONFIG_PATH = path.resolve(process.cwd(), 'env/addresses.testnet.json')
 const ADDRESSES_NETWORK_KEY = 'hedera-testnet'
 

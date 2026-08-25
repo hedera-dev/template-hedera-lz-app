@@ -1,5 +1,7 @@
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
+import { loadDeploymentAddressOrUndefined } from '../config/utils'
+
 import { DeploymentConfig } from './types'
 
 // ============================================
@@ -18,6 +20,18 @@ import { DeploymentConfig } from './types'
 const HUB_EID = EndpointId.HEDERA_V2_TESTNET
 const SPOKE_EIDS = [EndpointId.BASESEP_V2_TESTNET]
 
+// Last known-good Hedera testnet MyHTSConnector. Used only when this checkout
+// has no local chapter1-asset artifact yet. Never leave assetOFTAddress
+// undefined: the ovault / ovault-strategy scripts would deploy a second,
+// unwired connector.
+const PUBLISHED_ASSET_OFT_ADDRESS = '0x2Df2cD4AC708488caacdDC0118F0995e55C74f98'
+
+// Prefer the local Chapter 1 artifact so a fresh connector redeploy is picked
+// up automatically. Fall back to the published pin so a clone without
+// deployments still attaches to a working testnet OFT.
+const ASSET_OFT_ADDRESS =
+    loadDeploymentAddressOrUndefined(HUB_EID, 'MyHTSConnector') ?? PUBLISHED_ASSET_OFT_ADDRESS
+
 // ============================================
 // Chapter 2: Basic OVault Configuration
 // ============================================
@@ -29,9 +43,10 @@ export const DEPLOYMENT_CONFIG: DeploymentConfig = {
             shareAdapter: 'MyShareOFTAdapter',
             composer: 'MyOVaultComposer',
         },
-        // Set these to use existing contracts instead of deploying new ones
+        // Set these to use existing contracts instead of deploying new ones.
+        // assetOFTAddress: local MyHTSConnector artifact, else published pin.
         vaultAddress: undefined,
-        assetOFTAddress: undefined,
+        assetOFTAddress: ASSET_OFT_ADDRESS,
         shareOFTAdapterAddress: undefined,
     },
     shareOFT: {
@@ -58,9 +73,8 @@ export const DEPLOYMENT_CONFIG_STRATEGY: DeploymentConfig = {
             composer: 'MyOVaultComposerStrategy',
         },
         vaultAddress: undefined,
-        // Pin to current deployed MyHTSConnector to avoid stale/implicit resolution.
-        // Update this after a fresh chapter1-asset redeploy.
-        assetOFTAddress: '0x2Df2cD4AC708488caacdDC0118F0995e55C74f98',
+        // Local MyHTSConnector artifact, else published pin. Never undefined.
+        assetOFTAddress: ASSET_OFT_ADDRESS,
         shareOFTAdapterAddress: undefined,
     },
     shareOFT: {
