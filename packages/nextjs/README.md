@@ -34,7 +34,7 @@ Supporting routes:
 
 ## Quick start
 
-1. Copy `packages/nextjs/.env.example` to `packages/nextjs/.env.local`.
+1. Env: the frontend falls back to the repo-root `.env`, so if you already set `RELAYER_PRIVATE_KEY` there you're done. To override per-frontend, copy `packages/nextjs/.env.example` to `packages/nextjs/.env.local` (it wins over the root file). Restart `next dev` after editing env files — they are only read at server start.
 2. Install workspace deps from repo root:
 
 ```bash
@@ -57,7 +57,7 @@ pnpm next:dev
 
 ## Relayer configuration (required for best UX)
 
-Set these in `packages/nextjs/.env.local`:
+Set these in the repo-root `.env` (or `packages/nextjs/.env.local` to override):
 
 - `RELAYER_PRIVATE_KEY` - key used by backend relayer to submit destination worker txs (`verify`, `commitAndExecute`, optional `compose302`)
 - `RELAYER_MAX_BRIDGE_AMOUNT_ETH` - optional cap for `/bridge` relayer processing

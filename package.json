@@ -82,7 +82,14 @@
       "ethers": "^5.7.2",
       "hardhat-deploy": "^0.12.1",
       "zod": "3.22.4"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "keccak",
+      "secp256k1",
+      "sharp",
+      "unrs-resolver",
+      "utf-8-validate"
+    ]
   },
   "overrides": {
     "ethers": "^5.7.2",

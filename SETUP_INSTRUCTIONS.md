@@ -42,6 +42,8 @@ BASE (Spoke)                           HEDERA (Hub)
 pnpm hardhat lz:deploy --tags chapter1-asset
 ```
 
+The command prompts for networks — `base-sepolia` and `hedera-testnet` come pre-selected, just press **Enter**. (For scripts, use `--ci --networks base-sepolia,hedera-testnet` to skip the prompt.)
+
 This deploys:
 
 - `MyNativeOFTAdapter` on Base Sepolia
@@ -66,16 +68,18 @@ pnpm hardhat lz:oapp:wire --oapp-config config/layerzero.asset.config.ts
 
 ### Step 4: Send Tokens Cross-Chain
 
-**Base → Hedera:** Send 0.01 ETH from Base to Hedera:
+**Base → Hedera:** Send 0.025 ETH from Base to Hedera:
 
 ```bash
 pnpm hardhat lz:oft:send \
   --src-eid 40245 \
   --dst-eid 40285 \
-  --amount 0.01 \
+  --amount 0.025 \
   --to 0xYOUR_ADDRESS \
   --simple-workers
 ```
+
+> **WETH budget:** this one bridge funds the whole walkthrough. Later steps spend HTS-wrapped WETH on Hedera: 0.001 (Chapter 2 local deposit) + 0.01 (Chapter 3 pool creation). After the 0.01 return leg below, ~0.014 remains — enough for both. If you bridge less here, top up by re-running this command before Chapter 2 Step 4.
 
 **Hedera → Base:** Send HTS-wrapped ETH back to Base as native ETH:
 
@@ -258,6 +262,8 @@ pnpm next:gen-contracts
 pnpm next:dev
 ```
 
+The frontend falls back to the repo-root `.env`, so `RELAYER_PRIVATE_KEY` set there already covers the relayer API — no second env file needed. (`packages/nextjs/.env.local` overrides the root file if present.) Env files are only read at server start: restart `next dev` after editing them.
+
 Then open `http://localhost:3000`.
 
 For operational frontend checks and relayer notes, see `RUNBOOK.md`.
@@ -342,6 +348,10 @@ cast balance <MY_NATIVE_OFT_ADAPTER_ADDRESS> --rpc-url $RPC_URL_BASE_SEPOLIA
 ### "Insufficient funds for gas"
 
 Hedera operations require HBAR. Fund your account at the [Hedera Portal](https://portal.hedera.com/).
+
+### Local deposit / pool creation fails with `INSUFFICIENT_TOKEN_BALANCE` or "Insufficient WETH balance"
+
+These steps spend your HTS-wrapped WETH **on Hedera**: Chapter 2 Step 4 (0.001) and Chapter 3 pool creation (0.01). If you sent everything back to Base in Chapter 1's return leg, your Hedera WETH balance is zero. Top up by re-running the Chapter 1 Base → Hedera send, then retry. See the "WETH budget" note in Chapter 1 Step 4.
 
 ### "Chapter 3 deposit fails with HTS: Transfer failed, INSUFFICIENT_TOKEN_BALANCE"
 

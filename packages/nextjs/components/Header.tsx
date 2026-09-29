@@ -128,7 +128,7 @@ export const Header = () => {
                   <ul className="list-disc ml-5 space-y-1.5">
                     <li>Deploy contracts and wire LayerZero paths using the setup commands.</li>
                     <li>Regenerate frontend bindings with <code>pnpm next:gen-contracts</code> after redeploys.</li>
-                    <li>Set required values in both <code>.env</code> and <code>packages/nextjs/.env.local</code>.</li>
+                    <li>Set required values in the repo-root <code>.env</code> (the frontend falls back to it; <code>packages/nextjs/.env.local</code> overrides).</li>
                   </ul>
                 </section>
 
