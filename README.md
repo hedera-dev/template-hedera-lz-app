@@ -32,10 +32,11 @@ npm create scaffold-hbar@latest -- --template hedera-dev/template-hedera-lz-app
 ```bash
 pnpm install
 cp .env.example .env
-cp packages/nextjs/.env.example packages/nextjs/.env.local
-# Edit .env and packages/nextjs/.env.local with required values
+# Edit .env: set PRIVATE_KEY and RELAYER_PRIVATE_KEY (the frontend reads the root .env too)
 pnpm hardhat:compile
 ```
+
+`pnpm install` may print warnings about deprecated transitive dependencies — safe to ignore. Native build scripts (keccak, secp256k1, sharp, …) are allowlisted via `pnpm.onlyBuiltDependencies` in the root `package.json`; on pnpm versions that don't support that field you'll see an "ignored build scripts" warning instead, also safe — everything falls back to JS implementations.
 
 Then follow **[SETUP_INSTRUCTIONS.md](SETUP_INSTRUCTIONS.md)** for Chapter 1–3 deploy, wire, and send.
 
