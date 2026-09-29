@@ -7,10 +7,10 @@ This repo is an external template for [`create-scaffold-hbar`](https://github.co
 ## Create a project
 
 ```bash
-npm create scaffold-hbar@latest -- --template hedera-dev/template-hedera-lz-app
+npm create scaffold-hbar@latest -- --template hedera-dev/template-hedera-lz-app#master
 ```
 
-`npx create-scaffold-hbar@latest --template hedera-dev/template-hedera-lz-app` is equivalent. After scaffolding, this template uses **pnpm** (not Yarn or npm) at the project root.
+`npx create-scaffold-hbar@latest --template hedera-dev/template-hedera-lz-app#master` is equivalent. The `#master` pin is required: the scaffold tool fetches the `main` branch by default and this repo's default branch is `master`. After scaffolding, this template uses **pnpm** (not Yarn or npm) at the project root.
 
 ## What you'll build
 
