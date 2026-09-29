@@ -181,6 +181,9 @@ importers:
       daisyui:
         specifier: ^5.0.9
         version: 5.5.19
+      dotenv:
+        specifier: ^16.4.1
+        version: 16.6.1
       encoding:
         specifier: ^0.1.13
         version: 0.1.13

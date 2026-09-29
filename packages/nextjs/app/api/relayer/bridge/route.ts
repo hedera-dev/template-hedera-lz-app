@@ -418,7 +418,11 @@ export async function POST(request: NextRequest) {
 
     const privateKeyRaw = process.env.RELAYER_PRIVATE_KEY;
     if (!privateKeyRaw) {
-      return jsonError(500, "config", "RELAYER_PRIVATE_KEY is not configured");
+      return jsonError(
+        500,
+        "config",
+        "RELAYER_PRIVATE_KEY is not configured (set it in the repo-root .env or packages/nextjs/.env.local, then restart the dev server)",
+      );
     }
     const privateKey = (privateKeyRaw.startsWith("0x") ? privateKeyRaw : `0x${privateKeyRaw}`) as `0x${string}`;
     const account = privateKeyToAccount(privateKey);
