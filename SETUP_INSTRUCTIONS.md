@@ -349,6 +349,14 @@ cast balance <MY_NATIVE_OFT_ADAPTER_ADDRESS> --rpc-url $RPC_URL_BASE_SEPOLIA
 
 Hedera operations require HBAR. Fund your account at the [Hedera Portal](https://portal.hedera.com/).
 
+### Wire fails on `setPeer` with `CONTRACT_REVERT_EXECUTED` / `OwnableUnauthorizedAccount`
+
+You changed `PRIVATE_KEY` in `.env` between deploy steps. Deploy scripts use `skipIfAlreadyDeployed`, so contracts deployed by the old key are kept and the new key can't wire them. Fix: delete the artifact(s) deployed by the old key from `deployments/<network>/`, re-run the deploy, then wire again. Check which key deployed what:
+
+```bash
+node -p "require('./deployments/hedera-testnet/MyHTSConnector.json').receipt.from"
+```
+
 ### Local deposit / pool creation fails with `INSUFFICIENT_TOKEN_BALANCE` or "Insufficient WETH balance"
 
 These steps spend your HTS-wrapped WETH **on Hedera**: Chapter 2 Step 4 (0.001) and Chapter 3 pool creation (0.01). If you sent everything back to Base in Chapter 1's return leg, your Hedera WETH balance is zero. Top up by re-running the Chapter 1 Base → Hedera send, then retry. See the "WETH budget" note in Chapter 1 Step 4.
