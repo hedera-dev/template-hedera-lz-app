@@ -15,7 +15,8 @@ const loadChainId = async (networkDir: string): Promise<number> => {
 
 const run = async () => {
   const result: Record<number, Record<string, Deployment>> = {};
-  const networks = await fs.readdir(deploymentsRoot);
+  // No deployments yet (fresh scaffold) → generate an empty contracts file
+  const networks = await fs.readdir(deploymentsRoot).catch(() => [] as string[]);
 
   for (const network of networks) {
     const networkDir = path.join(deploymentsRoot, network);
